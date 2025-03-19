@@ -76,18 +76,22 @@ pub fn verify_apply_inner(
     validation: BlockValidationContext,
 ) -> Result<BlockImportResult, BlockImportError> {
     // Check block number and block hash against db
+    let check_start = std::time::Instant::now();
     let (block_number, parent_block_hash) =
         check_parent_hash_and_num(backend, block.header.parent_block_hash, block.unverified_block_number, &validation)?;
+    tracing::info!("check_parent_hash_and_num took {:?}", check_start.elapsed());
 
-    // Update contract and its storage tries
+    let update_start = std::time::Instant::now();
     let global_state_root = update_tries(backend, &block, &validation, block_number)?;
+    tracing::info!("update_tries took {:?}", update_start.elapsed());
 
-    // Block hash
+    let block_hash_start = std::time::Instant::now();
     let (block_hash, header) = block_hash(&block, &validation, block_number, parent_block_hash, global_state_root)?;
+    tracing::info!("block_hash took {:?}", block_hash_start.elapsed());
 
-    tracing::debug!("verify_apply_inner store block {}", header.block_number);
+    tracing::info!("verify_apply_inner store block {}", header.block_number);
 
-    // store block, also uses rayon heavily internally
+    let store_start = std::time::Instant::now();
     backend
         .store_block(
             MadaraMaybePendingBlock {
@@ -105,6 +109,8 @@ pub fn verify_apply_inner(
             None,
         )
         .map_err(make_db_error("storing block in db"))?;
+
+    tracing::info!("store_block took {:?}", store_start.elapsed());
 
     Ok(BlockImportResult { header, block_hash })
 }

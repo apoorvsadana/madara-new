@@ -286,6 +286,7 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
 
             if txs_to_process.is_empty() {
                 // Not enough transactions in mempool to make a new batch.
+                // tracing::info!("Not enough transactions in mempool to make a new batch.");
                 break;
             }
 
@@ -298,7 +299,7 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
                 "👀 This is exactly how long execute took - {:?}, txs count {:?} tps - {:?}",
                 start_time_execute.elapsed(),
                 all_results.len(),
-                all_results.len() * 1000 / start_time_execute.elapsed().as_millis() as usize
+                all_results.len() * 1000000 / start_time_execute.elapsed().as_micros() as usize
             );
             // When the bouncer cap is reached, blockifier will return fewer results than what we asked for.
             block_now_full = all_results.len() < txs_to_process_blockifier.len();
@@ -351,6 +352,7 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
             }
 
             if block_now_full {
+                tracing::info!("Block is full, breaking the loop");
                 break;
             }
         }
@@ -366,13 +368,13 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
             .txs_re_add(txs_to_process, executed_txs)
             .map_err(|err| Error::Unexpected(format!("Mempool error: {err:#}").into()))?;
 
-        tracing::info!(
-            "Finished tick with {} new transactions, now at {} - re-adding {} txs to mempool in time {:?}",
-            stats.n_added_to_block,
-            self.block.inner.transactions.len(),
-            stats.n_re_added_to_mempool,
-            start_time.elapsed()
-        );
+        // tracing::info!(
+        //     "Finished tick with {} new transactions, now at {} - re-adding {} txs to mempool in time {:?}",
+        //     stats.n_added_to_block,
+        //     self.block.inner.transactions.len(),
+        //     stats.n_re_added_to_mempool,
+        //     start_time.elapsed()
+        // );
 
         Ok(ContinueBlockResult { state_diff, visited_segments, bouncer_weights, stats, block_now_full })
     }
@@ -400,6 +402,7 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
         let n_txs = block_to_close.inner.transactions.len();
 
         // Close and import the block
+        tracing::info!("Closing block #{}", block_n);
         let import_result = close_block(
             &self.importer,
             block_to_close,
@@ -410,19 +413,31 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
             visited_segments,
         )
         .await?;
+        tracing::info!("Block #{} closed", block_n);
 
+        let start_time_mark_included = std::time::Instant::now();
         // Removes nonces in the mempool nonce cache which have been included
         // into the current block.
         for NonceUpdate { contract_address, .. } in state_diff.nonces.iter() {
             self.mempool.tx_mark_included(contract_address);
         }
+        tracing::info!("Time taken to mark included transactions: {:?}", start_time_mark_included.elapsed());
 
+        let start_time_flush = std::time::Instant::now();
         // Flush changes to disk
-        self.backend.flush().map_err(|err| BlockImportError::Internal(format!("DB flushing error: {err:#}").into()))?;
+        if block_n % 100 == 0 {
+            self.backend
+                .flush()
+                .map_err(|err| BlockImportError::Internal(format!("DB flushing error: {err:#}").into()))?;
+        }
+        tracing::info!("Time taken to flush changes to disk: {:?}", start_time_flush.elapsed());
 
+        let start_time_update_parent_hash = std::time::Instant::now();
         // Update parent hash for new pending block
         self.block.info.header.parent_block_hash = import_result.block_hash;
+        tracing::info!("Time taken to update parent hash: {:?}", start_time_update_parent_hash.elapsed());
 
+        let start_time_prepare_executor = std::time::Instant::now();
         // Prepare executor for next block
         self.executor =
             ExecutionContext::new_at_block_start(Arc::clone(&self.backend), &self.block.info.clone().into())?
@@ -491,6 +506,9 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
 
     #[tracing::instrument(skip(self), fields(module = "BlockProductionTask"))]
     pub async fn on_pending_time_tick(&mut self) -> Result<bool, Error> {
+        if (4090..4140).contains(&self.block_n()) {
+            return Ok(false);
+        }
         let current_pending_tick = self.current_pending_tick;
         if current_pending_tick == 0 {
             return Ok(false);
@@ -521,6 +539,7 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
             self.update_block_hash_registry(&mut new_state_diff, block_n)?;
 
             tracing::info!("Resource limits reached, closing block early");
+            tracing::info!("These are bouncer weights: {:?}", bouncer_weights);
             self.close_and_prepare_next_block(new_state_diff, visited_segments, start_time).await?;
             return Ok(true);
         }
@@ -544,10 +563,18 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
     #[tracing::instrument(skip(self), fields(module = "BlockProductionTask"))]
     pub(crate) async fn on_block_time(&mut self) -> Result<(), Error> {
         let block_n = self.block_n();
-        tracing::debug!("closing block #{}", block_n);
 
         // Complete the block with full bouncer capacity
         let start_time = Instant::now();
+
+        if (4090..4140).contains(&block_n) {
+            tracing::warn!("🚨 Block #{} production skipped", block_n);
+            let mut new_state_diff = StateDiff::default();
+            self.update_block_hash_registry(&mut new_state_diff, block_n)?;
+            self.close_and_prepare_next_block(new_state_diff, VisitedSegments::default(), start_time).await?;
+            return Ok(());
+        }
+
         let ContinueBlockResult {
             state_diff: mut new_state_diff,
             visited_segments,
@@ -555,10 +582,22 @@ impl<Mempool: MempoolProvider> BlockProductionTask<Mempool> {
             stats: _stats,
             block_now_full: _block_now_full,
         } = self.continue_block(self.backend.chain_config().bouncer_config.block_max_capacity)?;
+        let continue_block_time = start_time.elapsed();
+        tracing::info!("Completed block with full bouncer capacity in {:?}", continue_block_time);
 
+        // Update block hash registry
+        let update_start_time = Instant::now();
         self.update_block_hash_registry(&mut new_state_diff, block_n)?;
+        let update_time = update_start_time.elapsed();
+        tracing::info!("Updated block hash registry in {:?}", update_time);
 
-        self.close_and_prepare_next_block(new_state_diff, visited_segments, start_time).await
+        // Close and prepare next block
+        let close_start_time = Instant::now();
+        self.close_and_prepare_next_block(new_state_diff, visited_segments, start_time).await?;
+        let close_time = close_start_time.elapsed();
+        tracing::info!("Closed and prepared next block in {:?}", close_time);
+
+        Ok(())
     }
 
     #[tracing::instrument(skip(self, ctx), fields(module = "BlockProductionTask"))]

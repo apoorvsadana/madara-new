@@ -27,7 +27,7 @@ impl ExecutionContext {
             self.block_context.clone(),
             // No concurrency yet.
             TransactionExecutorConfig {
-                concurrency_config: ConcurrencyConfig { enabled: false, n_workers: 5, chunk_size: 10000 },
+                concurrency_config: ConcurrencyConfig { enabled: true, n_workers: 32, chunk_size: 64 },
             },
         )
     }
