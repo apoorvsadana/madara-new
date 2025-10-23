@@ -18,7 +18,7 @@ use starknet_api::{
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[derive(Debug)]
@@ -60,7 +60,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         };
 
         Ok(Self {
-            inner: BlockifierStateAdapter::new(view, block_number),
+            inner: BlockifierStateAdapter::new(view, block_number, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new()))),
             gas_prices,
             cached_states_by_block_n: Default::default(),
         })
@@ -106,7 +106,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         self.cached_states_by_block_n.push_front(CacheByBlock { block_n, state_diff, classes, l1_to_l2_messages });
 
         // Update the inner state adaptor to update its block_n to the next one.
-        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1);
+        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())));
 
         Ok(())
     }

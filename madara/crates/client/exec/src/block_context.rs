@@ -13,9 +13,13 @@ use mp_block::MadaraMaybePreconfirmedBlockInfo;
 use mp_chain_config::{ChainConfig, L1DataAvailabilityMode, StarknetVersion};
 use starknet_api::{
     block::{BlockInfo, BlockNumber, BlockTimestamp},
-    core::ContractAddress,
+    core::{ContractAddress, Nonce},
+    state::StorageKey,
 };
-use std::sync::Arc;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 fn block_context(
     chain_config: &ChainConfig,
@@ -41,6 +45,17 @@ pub struct ExecutionContext<D: MadaraStorageRead> {
     pub state: CachedState<BlockifierStateAdapter<D>>,
     pub block_context: Arc<BlockContext>,
     pub protocol_version: StarknetVersion,
+    pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+    pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
+}
+
+impl<D: MadaraStorageRead> ExecutionContext<D> {
+    pub fn clear_storage_reads(&self) {
+        self.storage_reads.lock().unwrap().clear();
+    }
+    pub fn clear_nonce_reads(&self) {
+        self.nonce_reads.lock().unwrap().clear();
+    }
 }
 
 impl<D: MadaraStorageRead> ExecutionContext<D> {
@@ -67,21 +82,36 @@ pub trait MadaraBlockViewExecutionExt<D: MadaraStorageRead> {
 impl<D: MadaraStorageRead> MadaraBlockViewExecutionExt<D> for MadaraBlockView<D> {
     fn new_execution_context(&self) -> Result<ExecutionContext<D>, Error> {
         let block_info = self.get_block_info()?;
+        let storage_reads = Arc::new(Mutex::new(HashMap::new()));
+        let nonce_reads = Arc::new(Mutex::new(HashMap::new()));
         Ok(ExecutionContext {
             protocol_version: *block_info.protocol_version(),
-            state: CachedState::new(BlockifierStateAdapter::new(self.clone().into(), block_info.block_number())),
+            state: CachedState::new(BlockifierStateAdapter::new(
+                self.clone().into(),
+                block_info.block_number(),
+                storage_reads.clone(),
+                nonce_reads.clone(),
+            )),
             block_context: block_context(self.backend().chain_config(), block_info)?,
+            storage_reads,
+            nonce_reads,
         })
     }
     fn new_execution_context_at_block_start(&self) -> Result<ExecutionContext<D>, Error> {
         let block_info = self.get_block_info()?;
+        let storage_reads = Arc::new(Mutex::new(HashMap::new()));
+        let nonce_reads = Arc::new(Mutex::new(HashMap::new()));
         Ok(ExecutionContext {
             protocol_version: *block_info.protocol_version(),
             state: CachedState::new(BlockifierStateAdapter::new(
                 self.clone().state_view_on_parent(), // Only make the parent block state visible..
                 block_info.block_number(),
+                storage_reads.clone(),
+                nonce_reads.clone(),
             )),
             block_context: block_context(self.backend().chain_config(), block_info)?, // ..but use the current block context
+            storage_reads,
+            nonce_reads,
         })
     }
 }

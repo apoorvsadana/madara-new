@@ -7,6 +7,8 @@ use mp_convert::ToFelt;
 use starknet_api::core::{ClassHash, CompiledClassHash, ContractAddress, Nonce};
 use starknet_api::state::StorageKey;
 use starknet_types_core::felt::Felt;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 /// Adapter for the db queries made by blockifier.
 ///
@@ -15,11 +17,18 @@ use starknet_types_core::felt::Felt;
 pub struct BlockifierStateAdapter<D: MadaraStorageRead = RocksDBStorage> {
     pub view: MadaraStateView<D>,
     pub block_number: u64,
+    pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+    pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
 }
 
 impl<D: MadaraStorageRead> BlockifierStateAdapter<D> {
-    pub fn new(view: MadaraStateView<D>, block_number: u64) -> Self {
-        Self { view, block_number }
+    pub fn new(
+        view: MadaraStateView<D>,
+        block_number: u64,
+        storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+        nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
+    ) -> Self {
+        Self { view, block_number, storage_reads, nonce_reads }
     }
 
     pub fn is_l1_to_l2_message_nonce_consumed(&self, nonce: u64) -> StateResult<bool> {
@@ -65,6 +74,8 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
             })?
             .unwrap_or(Felt::ZERO);
 
+        self.storage_reads.lock().unwrap().insert(contract_address, key);
+
         tracing::debug!(
             "get_storage_at: on={}, contract_address={:#x} key={:#x} => {value:#x}",
             self.view,
@@ -87,6 +98,7 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
                 ))
             })?
             .unwrap_or(Felt::ZERO);
+        self.nonce_reads.lock().unwrap().insert(contract_address, Nonce(value));
 
         tracing::debug!(
             "get_nonce_at: on={}, contract_address={:#x} => {value:#x}",

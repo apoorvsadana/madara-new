@@ -36,7 +36,10 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
             executed_prev += 1;
         }
 
-        transactions_to_trace
+        self.clear_storage_reads();
+        self.clear_nonce_reads();
+
+        let trace_results = transactions_to_trace
             .into_iter()
             .enumerate()
             .map(|(index, tx): (_, Transaction)| {
@@ -83,7 +86,12 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
                     state_diff: state_diff.state_maps.into(),
                 })
             })
-            .collect::<Result<Vec<_>, _>>()
+            .collect::<Result<Vec<_>, _>>();
+
+        println!("storage reads: {:?}", self.storage_reads.lock().unwrap());
+        println!("nonce reads: {:?}", self.nonce_reads.lock().unwrap());
+
+        trace_results
     }
 }
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::starknet_api_openrpc::*;
 use serde::{Deserialize, Serialize};
 use starknet_types_core::felt::Felt;
@@ -128,10 +130,12 @@ pub struct TraceBlockTransactionsResult {
 }
 
 /// Trace of a single transaction returned by `starknet_traceTransaction`
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TraceTransactionResult {
     #[serde(flatten)]
     pub trace: TransactionTrace,
+    pub storage_reads: HashMap<Felt, Felt>,
+    pub nonce_reads: HashMap<Felt, Felt>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Default)]
