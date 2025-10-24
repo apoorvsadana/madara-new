@@ -134,7 +134,7 @@ pub struct TraceBlockTransactionsResult {
 pub struct TraceTransactionResult {
     #[serde(flatten)]
     pub trace: TransactionTrace,
-    pub storage_reads: HashMap<Felt, Felt>,
+    pub storage_reads: HashMap<(Felt, Felt), Felt>,
     pub nonce_reads: HashMap<Felt, Felt>,
 }
 

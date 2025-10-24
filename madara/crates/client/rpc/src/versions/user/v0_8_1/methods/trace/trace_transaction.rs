@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::errors::StarknetRpcResult;
 use crate::versions::user::v0_8_1::methods::trace::trace_block_transactions::prepare_tx_for_reexecution;
 use crate::{Starknet, StarknetRpcApiError};
@@ -44,12 +46,14 @@ pub async fn trace_transaction(
     let trace = execution_result_to_tx_trace_v0_8(&execution_result, exec_context.block_context.versioned_constants())
         .context("Converting execution infos to tx trace")?;
 
-    let storage_reads = exec_context.storage_reads.lock().unwrap().iter().map(|(k, v)| (k.0.key().clone(), v.0.key().clone())).collect();
+    let storage_reads: HashMap<(Felt, Felt), Felt> = exec_context
+        .storage_reads
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|((c, s), v)| ((c.0.key().clone(), s.0.key().clone()), *v))
+        .collect();
     let nonce_reads = exec_context.nonce_reads.lock().unwrap().iter().map(|(k, v)| (k.0.key().clone(), v.0)).collect();
 
-    Ok(TraceTransactionResult {
-        trace,
-        storage_reads,
-        nonce_reads,
-    })
+    Ok(TraceTransactionResult { trace, storage_reads, nonce_reads })
 }

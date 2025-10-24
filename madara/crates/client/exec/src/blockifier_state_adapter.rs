@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 pub struct BlockifierStateAdapter<D: MadaraStorageRead = RocksDBStorage> {
     pub view: MadaraStateView<D>,
     pub block_number: u64,
-    pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+    pub storage_reads: Arc<Mutex<HashMap<(ContractAddress, StorageKey), Felt>>>,
     pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
     pub cache: RwLock<StateCache>,
 }
@@ -29,7 +29,7 @@ impl<D: MadaraStorageRead> BlockifierStateAdapter<D> {
     pub fn new(
         view: MadaraStateView<D>,
         block_number: u64,
-        storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+        storage_reads: Arc<Mutex<HashMap<(ContractAddress, StorageKey), Felt>>>,
         nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
         cache: RwLock<StateCache>,
     ) -> Self {
@@ -68,7 +68,7 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
     fn get_storage_at(&self, contract_address: ContractAddress, key: StorageKey) -> StateResult<Felt> {
         let cache = self.cache.read().unwrap();
         if let Some(value) = cache.get_storage_at(contract_address, key) {
-            self.storage_reads.lock().unwrap().insert(contract_address, key);
+            self.storage_reads.lock().unwrap().insert((contract_address, key), *value);
             // No need to update the cache here because blockifier is still internally used CachedState.
             return Ok(*value);
         }
@@ -86,7 +86,7 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
             })?
             .unwrap_or(Felt::ZERO);
 
-        self.storage_reads.lock().unwrap().insert(contract_address, key);
+        self.storage_reads.lock().unwrap().insert((contract_address, key), value);
 
         tracing::debug!(
             "get_storage_at: on={}, contract_address={:#x} key={:#x} => {value:#x}",

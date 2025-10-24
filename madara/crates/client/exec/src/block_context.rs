@@ -11,6 +11,7 @@ use blockifier::{
 use mc_db::{MadaraBackend, MadaraBlockView, MadaraStateView, MadaraStorageRead};
 use mp_block::MadaraMaybePreconfirmedBlockInfo;
 use mp_chain_config::{ChainConfig, L1DataAvailabilityMode, StarknetVersion};
+use mp_convert::Felt;
 use starknet_api::{
     block::{BlockInfo, BlockNumber, BlockTimestamp},
     core::{ContractAddress, Nonce},
@@ -44,7 +45,7 @@ pub struct ExecutionContext<D: MadaraStorageRead> {
     pub state: CachedState<BlockifierStateAdapter<D>>,
     pub block_context: Arc<BlockContext>,
     pub protocol_version: StarknetVersion,
-    pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
+    pub storage_reads: Arc<Mutex<HashMap<(ContractAddress, StorageKey), Felt>>>,
     pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
 }
 
