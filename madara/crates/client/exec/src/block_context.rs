@@ -45,7 +45,7 @@ pub struct ExecutionContext<D: MadaraStorageRead> {
     pub state: CachedState<BlockifierStateAdapter<D>>,
     pub block_context: Arc<BlockContext>,
     pub protocol_version: StarknetVersion,
-    pub storage_reads: Arc<Mutex<HashMap<(ContractAddress, StorageKey), Felt>>>,
+    pub storage_reads: Arc<Mutex<HashMap<ContractAddress, HashMap<StorageKey, Felt>>>>,
     pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
 }
 
