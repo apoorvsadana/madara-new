@@ -17,7 +17,7 @@ use starknet_api::{
     state::StorageKey,
 };
 use std::{
-    cell::RefCell, collections::{HashMap, HashSet, VecDeque}, sync::{Arc, Mutex}
+    cell::RefCell, collections::{HashMap, HashSet, VecDeque}, sync::{Arc, Mutex, RwLock}
 };
 
 #[derive(Debug)]
@@ -59,7 +59,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         };
 
         Ok(Self {
-            inner: BlockifierStateAdapter::new(view, block_number, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RefCell::new(StateCache::default())),
+            inner: BlockifierStateAdapter::new(view, block_number, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RwLock::new(StateCache::default())),
             gas_prices,
             cached_states_by_block_n: Default::default(),
         })
@@ -105,7 +105,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         self.cached_states_by_block_n.push_front(CacheByBlock { block_n, state_diff, classes, l1_to_l2_messages });
 
         // Update the inner state adaptor to update its block_n to the next one.
-        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RefCell::new(StateCache::default()));
+        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RwLock::new(StateCache::default()));
 
         Ok(())
     }
