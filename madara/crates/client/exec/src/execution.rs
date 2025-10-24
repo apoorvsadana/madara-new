@@ -36,8 +36,7 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
             executed_prev += 1;
         }
 
-        self.clear_storage_reads();
-        self.clear_nonce_reads();
+        self.clear_cache();
 
         let trace_results = transactions_to_trace
             .into_iter()

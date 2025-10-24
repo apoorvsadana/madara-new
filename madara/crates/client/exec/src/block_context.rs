@@ -50,11 +50,15 @@ pub struct ExecutionContext<D: MadaraStorageRead> {
 }
 
 impl<D: MadaraStorageRead> ExecutionContext<D> {
-    pub fn clear_storage_reads(&self) {
+    pub fn clear_cache(&mut self) {
         self.storage_reads.lock().unwrap().clear();
-    }
-    pub fn clear_nonce_reads(&self) {
         self.nonce_reads.lock().unwrap().clear();
+        self.state = CachedState::new(BlockifierStateAdapter::new(
+            self.state.state.view.clone(),
+            self.state.state.block_number,
+            self.storage_reads.clone(),
+            self.nonce_reads.clone(),
+        ));
     }
 }
 
