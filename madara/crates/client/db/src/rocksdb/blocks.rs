@@ -31,11 +31,8 @@ pub const BLOCK_BOUNCER_WEIGHT_COLUMN: Column =
 const TRANSACTIONS_KEY_LEN: usize = size_of::<u32>() + size_of::<u16>();
 fn make_transaction_column_key(block_n: u32, tx_index: u16) -> [u8; TRANSACTIONS_KEY_LEN] {
     let mut key = [0u8; TRANSACTIONS_KEY_LEN];
-    println!("block_n: {:?}, tx_index: {:?}", block_n, tx_index);
-    println!("block_n to be bytes: {:?}, tx_index to be bytes: {:?}", block_n.to_be_bytes(), tx_index.to_be_bytes());
     key[..4].copy_from_slice(&block_n.to_be_bytes());
     key[4..].copy_from_slice(&tx_index.to_be_bytes());
-    println!("key: {:?}", key);
     key
 }
 
