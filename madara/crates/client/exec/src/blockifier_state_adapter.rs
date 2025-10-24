@@ -1,4 +1,5 @@
 use blockifier::execution::contract_class::RunnableCompiledClass;
+use blockifier::state::cached_state::StateCache;
 use blockifier::state::errors::StateError;
 use blockifier::state::state_api::{StateReader, StateResult};
 use mc_db::rocksdb::RocksDBStorage;
@@ -7,6 +8,7 @@ use mp_convert::ToFelt;
 use starknet_api::core::{ClassHash, CompiledClassHash, ContractAddress, Nonce};
 use starknet_api::state::StorageKey;
 use starknet_types_core::felt::Felt;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -19,6 +21,7 @@ pub struct BlockifierStateAdapter<D: MadaraStorageRead = RocksDBStorage> {
     pub block_number: u64,
     pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
     pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
+    pub cache: RefCell<StateCache>,
 }
 
 impl<D: MadaraStorageRead> BlockifierStateAdapter<D> {
@@ -27,8 +30,9 @@ impl<D: MadaraStorageRead> BlockifierStateAdapter<D> {
         block_number: u64,
         storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
         nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
+        cache: RefCell<StateCache>,
     ) -> Self {
-        Self { view, block_number, storage_reads, nonce_reads }
+        Self { view, block_number, storage_reads, nonce_reads, cache }
     }
 
     pub fn is_l1_to_l2_message_nonce_consumed(&self, nonce: u64) -> StateResult<bool> {
@@ -61,6 +65,13 @@ impl<D: MadaraStorageRead> BlockifierStateAdapter<D> {
 // It is however properly handled for transaction validator.
 impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
     fn get_storage_at(&self, contract_address: ContractAddress, key: StorageKey) -> StateResult<Felt> {
+        let cache = self.cache.borrow_mut();
+        if let Some(value) = cache.get_storage_at(contract_address, key) {
+            self.storage_reads.lock().unwrap().insert(contract_address, key);
+            // No need to update the cache here because blockifier is still internally used CachedState.
+            return Ok(*value);
+        }
+
         let value = self
             .view
             .get_contract_storage(&contract_address.to_felt(), &key.to_felt())
@@ -87,6 +98,13 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
     }
 
     fn get_nonce_at(&self, contract_address: ContractAddress) -> StateResult<Nonce> {
+        let cache = self.cache.borrow_mut();
+        if let Some(value) = cache.get_nonce_at(contract_address) {
+            self.nonce_reads.lock().unwrap().insert(contract_address, *value);
+            // No need to update the cache here because blockifier is still internally used CachedState.
+            return Ok(*value);
+        }
+
         let value = self
             .view
             .get_contract_nonce(&contract_address.to_felt())
@@ -111,6 +129,12 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
 
     /// Blockifier expects us to return 0x0 if the contract is not deployed.
     fn get_class_hash_at(&self, contract_address: ContractAddress) -> StateResult<ClassHash> {
+        let cache = self.cache.borrow_mut();
+        if let Some(value) = cache.get_class_hash_at(contract_address) {
+            // No need to update the cache here because blockifier is still internally used CachedState.
+            return Ok(*value);
+        }
+
         let value = self
             .view
             .get_contract_class_hash(&contract_address.to_felt())
@@ -133,6 +157,9 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
     }
 
     fn get_compiled_class(&self, class_hash: ClassHash) -> StateResult<RunnableCompiledClass> {
+        let cache = self.cache.borrow_mut();
+        // TODO: what do we do here for cache?
+
         let value = self.view.get_class_info_and_compiled(&class_hash.to_felt()).map_err(|err| {
             StateError::StateReadError(format!(
                 "Failed to retrieve class: on={}, class_hash={:#x}: {err:#}",
@@ -152,6 +179,12 @@ impl<D: MadaraStorageRead> StateReader for BlockifierStateAdapter<D> {
     }
 
     fn get_compiled_class_hash(&self, class_hash: ClassHash) -> StateResult<CompiledClassHash> {
+        let cache = self.cache.borrow_mut();
+        if let Some(value) = cache.get_compiled_class_hash(class_hash) {
+            // No need to update the cache here because blockifier is still internally used CachedState.
+            return Ok(*value);
+        }
+
         let value = self.view.get_class_info(&class_hash.to_felt()).map_err(|err| {
             StateError::StateReadError(format!(
                 "Failed to retrieve class_hash: on={}, class_hash={:#x}: {err:#}",

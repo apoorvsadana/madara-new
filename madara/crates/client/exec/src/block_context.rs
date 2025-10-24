@@ -6,7 +6,7 @@ use blockifier::{
         transaction_executor::{TransactionExecutor, DEFAULT_STACK_SIZE},
     },
     context::BlockContext,
-    state::cached_state::CachedState,
+    state::cached_state::{CachedState, StateCache},
 };
 use mc_db::{MadaraBackend, MadaraBlockView, MadaraStateView, MadaraStorageRead};
 use mp_block::MadaraMaybePreconfirmedBlockInfo;
@@ -17,8 +17,7 @@ use starknet_api::{
     state::StorageKey,
 };
 use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
+    cell::RefCell, collections::HashMap, sync::{Arc, Mutex}
 };
 
 fn block_context(
@@ -43,6 +42,7 @@ fn block_context(
 
 pub struct ExecutionContext<D: MadaraStorageRead> {
     pub state: CachedState<BlockifierStateAdapter<D>>,
+    pub cache: RefCell<StateCache>,
     pub block_context: Arc<BlockContext>,
     pub protocol_version: StarknetVersion,
     pub storage_reads: Arc<Mutex<HashMap<ContractAddress, StorageKey>>>,
@@ -53,11 +53,13 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
     pub fn clear_cache(&mut self) {
         self.storage_reads.lock().unwrap().clear();
         self.nonce_reads.lock().unwrap().clear();
+        self.cache = self.state.cache.clone();
         self.state = CachedState::new(BlockifierStateAdapter::new(
             self.state.state.view.clone(),
             self.state.state.block_number,
             self.storage_reads.clone(),
             self.nonce_reads.clone(),
+            self.cache.clone(),
         ));
     }
 }
@@ -95,10 +97,12 @@ impl<D: MadaraStorageRead> MadaraBlockViewExecutionExt<D> for MadaraBlockView<D>
                 block_info.block_number(),
                 storage_reads.clone(),
                 nonce_reads.clone(),
+                RefCell::new(StateCache::default()),
             )),
             block_context: block_context(self.backend().chain_config(), block_info)?,
             storage_reads,
             nonce_reads,
+            cache: RefCell::new(StateCache::default()),
         })
     }
     fn new_execution_context_at_block_start(&self) -> Result<ExecutionContext<D>, Error> {
@@ -112,10 +116,12 @@ impl<D: MadaraStorageRead> MadaraBlockViewExecutionExt<D> for MadaraBlockView<D>
                 block_info.block_number(),
                 storage_reads.clone(),
                 nonce_reads.clone(),
+                RefCell::new(StateCache::default()),
             )),
             block_context: block_context(self.backend().chain_config(), block_info)?, // ..but use the current block context
             storage_reads,
             nonce_reads,
+            cache: RefCell::new(StateCache::default()),
         })
     }
 }
