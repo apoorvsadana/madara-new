@@ -60,7 +60,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         };
 
         Ok(Self {
-            inner: BlockifierStateAdapter::new(view, block_number, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new()))),
+            inner: BlockifierStateAdapter::new(view, block_number, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RefCell::new(StateCache::default())),
             gas_prices,
             cached_states_by_block_n: Default::default(),
         })
