@@ -3,7 +3,7 @@ use anyhow::Context;
 use blockifier::{
     execution::contract_class::RunnableCompiledClass,
     state::{
-        cached_state::StateMaps,
+        cached_state::{StateCache, StateMaps},
         errors::StateError,
         state_api::{StateReader, StateResult},
     },
@@ -17,8 +17,7 @@ use starknet_api::{
     state::StorageKey,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
-    sync::{Arc, Mutex},
+    cell::RefCell, collections::{HashMap, HashSet, VecDeque}, sync::{Arc, Mutex}
 };
 
 #[derive(Debug)]
@@ -106,7 +105,7 @@ impl<D: MadaraStorageRead> LayeredStateAdapter<D> {
         self.cached_states_by_block_n.push_front(CacheByBlock { block_n, state_diff, classes, l1_to_l2_messages });
 
         // Update the inner state adaptor to update its block_n to the next one.
-        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())));
+        self.inner = BlockifierStateAdapter::new(new_view, block_n + 1, Arc::new(Mutex::new(HashMap::new())), Arc::new(Mutex::new(HashMap::new())), RefCell::new(StateCache::default()));
 
         Ok(())
     }
