@@ -1,20 +1,32 @@
 //! Executor thread internal logic.
 
-use crate::util::{create_execution_context, BatchToExecute, BlockExecutionContext, ExecutionStats};
+use crate::util::{create_execution_context, AdditionalTxInfo, BatchToExecute, BlockExecutionContext, ExecutionStats};
 use anyhow::Context;
-use blockifier::{blockifier::transaction_executor::TransactionExecutor, state::state_api::State};
+use blockifier::{
+    blockifier::transaction_executor::TransactionExecutor,
+    state::{
+        cached_state::{CommitmentStateDiff, StateMaps},
+        state_api::State,
+    },
+    transaction::{account_transaction::ExecutionFlags, objects::TransactionExecutionInfo},
+};
 use futures::future::OptionFuture;
 use mc_db::MadaraBackend;
 use mc_exec::{execution::TxInfo, LayeredStateAdapter, MadaraBackendExecutionExt};
 use mp_convert::{Felt, ToFelt};
-use starknet_api::contract_class::ContractClass;
-use starknet_api::core::ClassHash;
+use rayon::prelude::*;
+use starknet_api::{contract_class::ContractClass, core::ContractAddress, hash::StarkHash, state::StorageKey};
+use starknet_api::{
+    core::{ClassHash, Nonce},
+    executable_transaction::AccountTransaction,
+};
 use std::{
     collections::{HashMap, HashSet},
     mem,
     sync::Arc,
 };
 use tokio::{sync::mpsc, time::Instant};
+use tracing::info;
 
 struct ExecutorStateExecuting {
     exec_ctx: BlockExecutionContext,
@@ -30,6 +42,11 @@ struct ExecutorStateNewBlock {
     /// Keep the cached adaptor around to keep the cache around.
     state_adaptor: LayeredStateAdapter,
     consumed_l1_to_l2_nonces: HashSet<u64>,
+}
+
+struct AppendBatchState {
+    pub transactions: Vec<AccountTransaction>,
+    pub transaction_results: Vec<(TransactionExecutionInfo, CommitmentStateDiff)>,
 }
 
 /// Note: The reason this exists is because we want to create the new block execution context (meaning, the block header) as late as possible, as to have
@@ -189,10 +206,18 @@ impl ExecutorThread {
     }
 
     /// End the current block.
-    fn end_block(&mut self, state: &mut ExecutorStateExecuting) -> anyhow::Result<ExecutorThreadState> {
+    /// `extend_state_diffs` are passed when appending a batch. We want the new block state adapter to include the state diffs created by the batch.
+    fn end_block(
+        &mut self,
+        state: &mut ExecutorStateExecuting,
+        extend_state_maps: Option<StateMaps>,
+    ) -> anyhow::Result<ExecutorThreadState> {
         let mut cached_state = state.executor.block_state.take().expect("Executor block state already taken");
 
-        let state_diff = cached_state.to_state_diff().context("Cannot make state diff")?.state_maps;
+        let mut state_diff = cached_state.to_state_diff().context("Cannot make state diff")?.state_maps;
+        if let Some(extend_state_maps) = extend_state_maps {
+            state_diff.extend(&extend_state_maps);
+        }
         let mut cached_adapter = cached_state.state;
         cached_adapter.finish_block(
             state_diff,
@@ -273,6 +298,7 @@ impl ExecutorThread {
         let mut force_close = false;
         let mut block_empty = true;
         let mut l2_gas_consumed_block = 0;
+        let mut append_batch_state: Option<AppendBatchState> = None;
 
         tracing::debug!("Starting executor thread.");
 
@@ -290,13 +316,184 @@ impl ExecutorThread {
                     // Got a batch
                     WaitTxBatchOutcome::Batch(batch_to_execute) => batch_to_execute,
                     // Got a command
-                    WaitTxBatchOutcome::Command(executor_command) => match executor_command {
-                        super::ExecutorCommand::CloseBlock(callback) => {
-                            force_close = true;
-                            let _ = callback.send(Ok(()));
-                            Default::default()
+                    WaitTxBatchOutcome::Command(executor_command) => {
+                        match executor_command {
+                            super::ExecutorCommand::CloseBlock(callback) => {
+                                force_close = true;
+                                let _ = callback.send(Ok(()));
+                                Default::default()
+                            }
+                            super::ExecutorCommand::AppendBatch(append_batch_params, callback) => {
+                                // validate if initial reads by the batch are correct in parallel
+                                let preconfirmed_view = self.backend.view_on_latest();
+
+                                // Run storage and nonce validation in parallel
+                                let (storage_result, nonce_result) = rayon::join(
+                                    || -> anyhow::Result<()> {
+                                        // Validate storage in parallel
+                                        append_batch_params.initial_storage.par_iter().try_for_each(
+                                            |(contract_address, storage)| {
+                                                storage.par_iter().try_for_each(|(key, value)| {
+                                                    let stored_value = preconfirmed_view
+                                                        .get_contract_storage(contract_address, key)?;
+                                                    if stored_value.unwrap_or_default() != *value {
+                                                        // Err(anyhow::anyhow!(
+                                                        //     "Initial storage value mismatch for contract {:#x} key {:#x}: expected {:#x} but got {:?}",
+                                                        //     contract_address, key, value, stored_value
+                                                        // ))
+                                                        anyhow::Ok(())
+                                                    } else {
+                                                        Ok(())
+                                                    }
+                                                })
+                                            },
+                                        )?;
+                                        Ok(())
+                                    },
+                                    || -> anyhow::Result<()> {
+                                        // Validate nonces in parallel
+                                        append_batch_params.initial_nonces.par_iter().try_for_each(
+                                            |(contract_address, nonce)| {
+                                                let stored_nonce =
+                                                    preconfirmed_view.get_contract_nonce(contract_address)?;
+                                                if stored_nonce.unwrap_or_default() != *nonce {
+                                                    // Err(anyhow::anyhow!(
+                                                    //     "Initial nonce mismatch for contract {:#x}: expected {:#x} but got {:?}",
+                                                    //     contract_address, nonce, stored_nonce
+                                                    // ))
+                                                    anyhow::Ok(())
+                                                } else {
+                                                    Ok(())
+                                                }
+                                            },
+                                        )?;
+                                        Ok(())
+                                    },
+                                );
+
+                                // Handle both results
+                                storage_result?;
+                                nonce_result?;
+
+                                if let ExecutorThreadState::NewBlock(state_new_block) = state {
+                                    // TODO: This code is copied from below. It's pretty ugle code where we go from new block to executing first
+                                    // and then we go back from executing to new block again. We're doing this as a hacky fix for now so that we
+                                    // create the correct `state` object. When you're in new state, you already have your adapter created. However,
+                                    // this adapter doesn't have the state diffs from the batch that we need for the rest of the code to work. So we close
+                                    // this block and create a new block with the state diffs in cache state that we need.
+                                    // The reason we need that cache state is so that `finalize` works fine during closing of a block and the correct state
+                                    // diffs are populated.
+
+                                    // Create new execution state.
+                                    let execution_state = self
+                                        .create_execution_state(state_new_block, l2_gas_consumed_block)
+                                        .context("Creating execution state")?;
+                                    l2_gas_consumed_block = 0;
+
+                                    tracing::debug!(
+                                        "Starting new block, block_n={}",
+                                        execution_state.exec_ctx.block_number
+                                    );
+                                    if self
+                                        .replies_sender
+                                        .blocking_send(super::ExecutorMessage::StartNewBlock {
+                                            exec_ctx: execution_state.exec_ctx.clone(),
+                                        })
+                                        .is_err()
+                                    {
+                                        // Receiver closed
+                                        break Ok(());
+                                    }
+
+                                    // Replace the state with ExecutorState::Executing while returning a mutable reference to it.
+                                    // I wish rust had a better way to do that :/
+                                    state = ExecutorThreadState::Executing(execution_state);
+                                }
+
+                                // If we're in executing state, close the current block and start a new one
+                                if let ExecutorThreadState::Executing(ref mut execution_state) = state {
+                                    info!(
+                                        "Closing current block before appending batch at block {}",
+                                        execution_state.exec_ctx.block_number
+                                    );
+                                    let block_exec_summary = execution_state.executor.finalize()?;
+                                    if self
+                                        .replies_sender
+                                        .blocking_send(super::ExecutorMessage::EndBlock(block_exec_summary))
+                                        .is_err()
+                                    {
+                                        // Receiver closed
+                                        return Ok(());
+                                    }
+                                    next_block_deadline = Instant::now() + block_time;
+
+                                    // end block and create new state using the batched state diff
+                                    let batch_state_diff = StateMaps {
+                                        storage: append_batch_params
+                                            .current_storage
+                                            .into_iter()
+                                            .flat_map(|(contract_address, storage)| {
+                                                storage.into_iter().map(move |(key, value)| {
+                                                    (
+                                                        (
+                                                            convert_felt_to_contract_address(contract_address),
+                                                            convert_felt_to_storage_key(key),
+                                                        ),
+                                                        value,
+                                                    )
+                                                })
+                                            })
+                                            .collect(),
+                                        nonces: append_batch_params
+                                            .current_nonces
+                                            .into_iter()
+                                            .map(|(contract_address, nonce)| {
+                                                (convert_felt_to_contract_address(contract_address), Nonce(nonce))
+                                            })
+                                            .collect(),
+                                        ..Default::default()
+                                    };
+                                    info!("len of storage changes in batch_state: {}", batch_state_diff.storage.len());
+                                    info!("len of nonces in batch_state: {}", batch_state_diff.nonces.len());
+                                    info!(
+                                        "len of class hashes in batch_state: {}",
+                                        batch_state_diff.class_hashes.len()
+                                    );
+                                    info!(
+                                        "len of compiled class hashes in batch_state: {}",
+                                        batch_state_diff.compiled_class_hashes.len()
+                                    );
+                                    info!(
+                                        "len of declared contracts in batch_state: {}",
+                                        batch_state_diff.declared_contracts.len()
+                                    );
+                                    state = self
+                                        .end_block(execution_state, Some(batch_state_diff))
+                                        .context("Ending block")?;
+                                    block_empty = true;
+
+                                    // setting force close to true as we don't want append batch txs to overlap with other txs for now
+                                    // when we've a better way to understand resources used inside an append batch, we can ignore closing the
+                                    // block
+                                    force_close = true;
+                                    info!(
+                                        "Preparing to execute append batch with {} transactions",
+                                        append_batch_params.transactions.len()
+                                    );
+                                    append_batch_state = Some(AppendBatchState {
+                                        transactions: append_batch_params.transactions,
+                                        transaction_results: append_batch_params.transaction_results,
+                                    });
+                                } else {
+                                    // TODO: how do we handle this?
+                                    unreachable!()
+                                }
+
+                                let _ = callback.send(Ok(()));
+                                Default::default()
+                            }
                         }
-                    },
+                    }
                     // Channel closed. Exit gracefully.
                     WaitTxBatchOutcome::Exit => return Ok(()),
                 };
@@ -333,7 +530,10 @@ impl ExecutorThread {
                         .context("Creating execution state")?;
                     l2_gas_consumed_block = 0;
 
-                    tracing::debug!("Starting new block, block_n={}", execution_state.exec_ctx.block_number);
+                    info!(
+                        "Starting new block {} with previous gas used {}",
+                        execution_state.exec_ctx.block_number, l2_gas_consumed_block
+                    );
                     if self
                         .replies_sender
                         .blocking_send(super::ExecutorMessage::StartNewBlock {
@@ -355,17 +555,63 @@ impl ExecutorThread {
 
             let exec_start_time = Instant::now();
 
-            // TODO: we should use the execution deadline option
-            // Execute the transactions.
-            let blockifier_results =
-                execution_state.executor.execute_txs(&to_exec.txs, /* execution_deadline */ None);
+            let (blockifier_results, block_full, executed_txs) = if append_batch_state.is_some() {
+                let append_batch_state = append_batch_state.take().unwrap();
+                info!("Starting append batch execution with {} transactions", append_batch_state.transactions.len());
+                let blockifier_results = append_batch_state
+                    .transaction_results
+                    .into_par_iter()
+                    .map(|(info, state_diff)| {
+                        let state_maps = StateMaps {
+                            nonces: state_diff.address_to_nonce.into_iter().collect(),
+                            class_hashes: state_diff.address_to_class_hash.into_iter().collect(),
+                            storage: state_diff
+                                .storage_updates
+                                .into_iter()
+                                .flat_map(|(addr, storage_map)| {
+                                    storage_map.into_iter().map(move |(key, value)| ((addr, key), value))
+                                })
+                                .collect(),
+                            compiled_class_hashes: state_diff.class_hash_to_compiled_class_hash.into_iter().collect(),
+                            declared_contracts: HashMap::new(), // Assuming we don't have this for now
+                        };
+                        Ok((info, state_maps))
+                    })
+                    .collect::<Vec<_>>();
 
+                // we don't want to mix batch txs with other txs
+                let block_full = true;
+
+                let mut batch_to_execute = BatchToExecute::default();
+                append_batch_state.transactions.into_iter().for_each(|tx| {
+                    let blockifier_tx = blockifier::transaction::transaction_execution::Transaction::Account(
+                        blockifier::transaction::account_transaction::AccountTransaction {
+                            tx,
+                            execution_flags: ExecutionFlags {
+                                only_query: false,
+                                charge_fee: true,
+                                validate: true,
+                                strict_nonce_check: true,
+                            },
+                        },
+                    ); // Assuming From trait is implemented
+                    let additional_info = AdditionalTxInfo::default(); // We can add declared class if needed
+                    batch_to_execute.push(blockifier_tx, additional_info);
+                });
+                (blockifier_results, block_full, batch_to_execute)
+            } else {
+                // TODO: we should use the execution deadline option
+                // Execute the transactions.
+                let blockifier_results =
+                    execution_state.executor.execute_txs(&to_exec.txs, /* execution_deadline */ None);
+                // When the bouncer cap is reached, blockifier will return fewer results than what we asked for.
+                let block_full = blockifier_results.len() < to_exec.len();
+
+                // Remove the used txs.
+                let executed_txs = to_exec.remove_n_front(blockifier_results.len());
+                (blockifier_results, block_full, executed_txs)
+            };
             let exec_duration = exec_start_time.elapsed();
-
-            // When the bouncer cap is reached, blockifier will return fewer results than what we asked for.
-            let block_full = blockifier_results.len() < to_exec.len();
-
-            let executed_txs = to_exec.remove_n_front(blockifier_results.len()); // Remove the used txs.
 
             let mut stats = ExecutionStats::default();
             stats.n_batches += 1;
@@ -406,12 +652,20 @@ impl ExecutorThread {
             l2_gas_consumed_block += stats.l2_gas_consumed;
 
             tracing::debug!("Finished batch execution.");
-            tracing::debug!("Stats: {:?}", stats);
+            info!(
+                "Execution stats: executed={}, added={}, reverted={}, rejected={}, gas={}, declared_classes={}",
+                stats.n_executed,
+                stats.n_added_to_block,
+                stats.n_reverted,
+                stats.n_rejected,
+                stats.l2_gas_consumed,
+                stats.declared_classes
+            );
             tracing::debug!(
                 "Weights: {:?}",
                 execution_state.executor.bouncer.lock().expect("Bouncer lock poisoned").get_bouncer_weights()
             );
-            tracing::debug!("Block now full: {:?}", block_full);
+            info!("Block status: full={}, empty={}, force_close={}", block_full, block_empty, force_close);
 
             let exec_result = super::BatchExecutionResult { executed_txs, blockifier_results, stats };
             if exec_result.stats.n_executed > 0
@@ -427,9 +681,13 @@ impl ExecutorThread {
             let now = Instant::now();
             let block_time_deadline_reached = now >= next_block_deadline;
             if force_close || block_full || block_time_deadline_reached {
-                tracing::debug!(
-                    "Ending block block_n={} (force_close={force_close}, block_full={block_full}, block_time_deadline_reached={block_time_deadline_reached})",
+                info!(
+                    "Ending block {} (force_close={}, block_full={}, block_time_deadline_reached={}, gas_used={})",
                     execution_state.exec_ctx.block_number,
+                    force_close,
+                    block_full,
+                    block_time_deadline_reached,
+                    l2_gas_consumed_block
                 );
                 let block_exec_summary = execution_state.executor.finalize()?;
 
@@ -438,10 +696,19 @@ impl ExecutorThread {
                     break Ok(());
                 }
                 next_block_deadline = Instant::now() + block_time;
-                state = self.end_block(execution_state).context("Ending block")?;
+                state = self.end_block(execution_state, None).context("Ending block")?;
                 block_empty = true;
                 force_close = false;
             }
         }
     }
+}
+
+pub fn convert_felt_to_contract_address(felt: Felt) -> ContractAddress {
+    let stark_hash = StarkHash::from(felt);
+    ContractAddress(stark_hash.try_into().expect("Failed to convert contract address to Patricia Key"))
+}
+
+pub fn convert_felt_to_storage_key(felt: Felt) -> StorageKey {
+    StorageKey(felt.try_into().expect("Failed to convert storage key to Patricia Key"))
 }

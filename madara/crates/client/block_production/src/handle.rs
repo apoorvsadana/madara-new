@@ -1,5 +1,11 @@
 use crate::executor::{self, ExecutorCommand, ExecutorCommandError};
+use crate::util::{AdditionalTxInfo, BatchToExecute, ExecutionStats};
+use crate::BatchExecutionResult;
 use async_trait::async_trait;
+use blockifier::blockifier::transaction_executor::{TransactionExecutionOutput, TransactionExecutorResult};
+use blockifier::state::cached_state::{CommitmentStateDiff, StateMaps};
+use blockifier::transaction::account_transaction::ExecutionFlags;
+use blockifier::transaction::objects::TransactionExecutionInfo;
 use mc_db::MadaraBackend;
 use mc_submit_tx::{
     SubmitTransaction, SubmitTransactionError, SubmitValidatedTransaction, TransactionValidator,
@@ -11,7 +17,11 @@ use mp_rpc::v0_9_0::{
     ClassAndTxnHash, ContractAndTxnHash,
 };
 use mp_transactions::validated::ValidatedTransaction;
+use mp_utils::append_batch::AppendBatchParams;
+use starknet_api::executable_transaction::AccountTransaction;
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
 struct BypassInput(mpsc::Sender<ValidatedTransaction>);
@@ -66,6 +76,19 @@ impl BlockProductionHandle {
             .send(ExecutorCommand::CloseBlock(sender))
             .map_err(|_| ExecutorCommandError::ChannelClosed)?;
         recv.await.map_err(|_| ExecutorCommandError::ChannelClosed)?
+    }
+
+    /// Append a batch executed outside of Madara (assuming third party is trusted)
+    pub async fn append_batch(&self, append_batch: AppendBatchParams) -> Result<(), ExecutorCommandError> {
+        let (sender, recv) = oneshot::channel();
+        self.executor_commands.send(ExecutorCommand::AppendBatch(append_batch, sender)).map_err(|e| {
+            tracing::error!("Error sending append batch command: {:?}", e);
+            ExecutorCommandError::ChannelClosed
+        })?;
+        recv.await.map_err(|e| {
+            tracing::error!("Error receiving append batch result: {:?}", e);
+            ExecutorCommandError::ChannelClosed
+        })?
     }
 
     /// Send a transaction through the bypass channel to bypass mempool and validation.

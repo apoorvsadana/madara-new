@@ -6,6 +6,7 @@ use mp_rpc::v0_9_0::{
     AddInvokeTransactionResult, BroadcastedDeclareTxn, BroadcastedDeployAccountTxn, BroadcastedInvokeTxn,
     ClassAndTxnHash, ContractAndTxnHash,
 };
+use mp_utils::append_batch::AppendBatchParams;
 use mp_utils::service::{MadaraServiceId, MadaraServiceStatus};
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +57,10 @@ pub trait MadaraWriteRpcApi {
     /// Only works in block production mode.
     #[method(name = "closeBlock")]
     async fn close_block(&self) -> RpcResult<()>;
+
+    /// Append a batch executed outside of Madara (assuming third party is trusted)
+    #[method(name = "appendBatch")]
+    async fn append_batch(&self, append_batch: AppendBatchParams) -> RpcResult<()>;
 }
 
 /// This is an admin method, so semver is different!

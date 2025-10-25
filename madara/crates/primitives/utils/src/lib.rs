@@ -1,6 +1,7 @@
 use std::{future::Future, pin::Pin, task};
 use tokio::{sync::oneshot, task::JoinHandle};
 
+pub mod append_batch;
 pub mod crypto;
 pub mod hash;
 pub mod parsers;

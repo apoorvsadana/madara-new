@@ -7,6 +7,7 @@ use mp_rpc::v0_9_0::{
     AddInvokeTransactionResult, BroadcastedDeclareTxn, BroadcastedDeployAccountTxn, BroadcastedInvokeTxn,
     ClassAndTxnHash, ContractAndTxnHash,
 };
+use mp_utils::append_batch::AppendBatchParams;
 
 #[async_trait]
 impl MadaraWriteRpcApiV0_1_0Server for Starknet {
@@ -80,6 +81,17 @@ impl MadaraWriteRpcApiV0_1_0Server for Starknet {
             .close_block()
             .await
             .context("Force-closing block")
+            .map_err(StarknetRpcApiError::from)?)
+    }
+
+    async fn append_batch(&self, append_batch: AppendBatchParams) -> RpcResult<()> {
+        Ok(self
+            .block_prod_handle
+            .as_ref()
+            .ok_or(StarknetRpcApiError::UnimplementedMethod)?
+            .append_batch(append_batch)
+            .await
+            .context("Appending batch")
             .map_err(StarknetRpcApiError::from)?)
     }
 }

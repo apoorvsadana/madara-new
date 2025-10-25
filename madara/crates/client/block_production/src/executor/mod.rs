@@ -4,6 +4,7 @@ use blockifier::blockifier::transaction_executor::{
     BlockExecutionSummary, TransactionExecutionOutput, TransactionExecutorResult,
 };
 use mc_db::MadaraBackend;
+use mp_utils::append_batch::AppendBatchParams;
 use std::{any::Any, panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
@@ -28,12 +29,16 @@ pub struct ExecutorThreadHandle {
 pub enum ExecutorCommandError {
     #[error("Executor not running")]
     ChannelClosed,
+    #[error("Cannot append batch on a new block for now")]
+    CannotAppendOnNewBlock,
 }
 
 #[derive(Debug)]
 pub enum ExecutorCommand {
     /// Force close the current block.
     CloseBlock(oneshot::Sender<Result<(), ExecutorCommandError>>),
+    /// Append a batch from a trusted executor
+    AppendBatch(AppendBatchParams, oneshot::Sender<Result<(), ExecutorCommandError>>),
 }
 
 #[derive(Debug)]

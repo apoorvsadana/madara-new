@@ -131,7 +131,7 @@ starknet-types-core = { version = "0.2.1", default-features = false, features = 
 #blockifier = { version = "=0.16.0-rc.0", features = ["node_api"] }
 #starknet_api = "=0.16.0-rc.0"
 blockifier = { git = "https://github.com/apoorvsadana/sequencer", rev = "bb122150e160f8a72e00e05b136f96a3807fcb97", features = [
-  "node_api",
+  "node_api", "transaction_serde"
 ] }
 starknet_api = { git = "https://github.com/apoorvsadana/sequencer", rev = "bb122150e160f8a72e00e05b136f96a3807fcb97" }
 cairo-lang-starknet-classes = "2.12.3"
