@@ -74,6 +74,10 @@ pub struct L2SyncParams {
     /// Enable bouncer config syncing.
     #[arg(env = "MADARA_ENABLE_BOUNCER_CONFIG_SYNCING", long, default_value_t = false)]
     pub bouncer_config_sync_enable: bool,
+
+    /// Disable hash and commitment checks
+    #[arg(env = "MADARA_DISABLE_HASH_AND_COMMITMENT_CHECKS", long, default_value_t = false)]
+    pub disable_hash_and_commitment_checks: bool,
 }
 
 impl L2SyncParams {

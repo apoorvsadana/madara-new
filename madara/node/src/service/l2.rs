@@ -34,6 +34,7 @@ struct StartArgs {
     params: L2SyncParams,
     warp_update: Option<WarpUpdateConfig>,
     unsafe_starting_block_enabled: bool,
+    disable_hash_and_commitment_checks: bool,
 }
 
 #[derive(Clone)]
@@ -57,6 +58,7 @@ impl SyncService {
                 params: config.clone(),
                 warp_update,
                 unsafe_starting_block_enabled,
+                disable_hash_and_commitment_checks: config.disable_hash_and_commitment_checks,
             }),
             disabled: config.l2_sync_disabled,
         })
@@ -70,12 +72,13 @@ impl Service for SyncService {
             return Ok(());
         }
         let this = self.start_args.take().expect("Service already started");
-        let importer = Arc::new(BlockImporter::new(
-            this.db_backend.clone(),
-            BlockValidationConfig::default()
-                .trust_parent_hash(this.unsafe_starting_block_enabled)
-                .trust_state_root(this.unsafe_starting_block_enabled),
-        ));
+        let mut block_validation_config = BlockValidationConfig::default()
+            .trust_parent_hash(this.unsafe_starting_block_enabled)
+            .trust_state_root(this.unsafe_starting_block_enabled);
+        if this.disable_hash_and_commitment_checks {
+            block_validation_config.all_verifications_disabled(true);
+        };
+        let importer = Arc::new(BlockImporter::new(this.db_backend.clone(), block_validation_config));
 
         let config = SyncControllerConfig::default()
             .l1_head_recv(this.l1_head_recv)
