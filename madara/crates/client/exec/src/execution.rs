@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{Error, ExecutionContext, ExecutionResult, TxExecError};
 use blockifier::fee::gas_usage::estimate_minimal_gas_vector;
 use blockifier::state::cached_state::TransactionalState;
@@ -7,7 +9,7 @@ use blockifier::transaction::objects::{HasRelatedFeeType, TransactionInfoCreator
 use blockifier::transaction::transaction_execution::Transaction;
 use blockifier::transaction::transactions::ExecutableTransaction;
 use mc_db::MadaraStorageRead;
-use mp_convert::ToFelt;
+use mp_convert::{Felt, ToFelt};
 use starknet_api::block::FeeType;
 use starknet_api::contract_class::ContractClass;
 use starknet_api::core::{ClassHash, ContractAddress, Nonce};
@@ -36,12 +38,14 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
             executed_prev += 1;
         }
 
-        self.clear_cache();
-
         let trace_results = transactions_to_trace
             .into_iter()
             .enumerate()
             .map(|(index, tx): (_, Transaction)| {
+                // move cache from cached state to inside the state adapter so that we get
+                // and accurate read of storage and nonce reads
+                self.clear_cache();
+
                 let hash = tx.tx_hash();
                 tracing::debug!("executing {:#x} (trace)", hash.to_felt());
                 let tx_type = tx.tx_type();
@@ -75,6 +79,16 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
                     Transaction::L1Handler(_) => GasVectorComputationMode::NoL2Gas,
                 };
 
+                let storage_reads: HashMap<Felt, HashMap<Felt, Felt>> = self
+                    .storage_reads
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(c, s)| (c.0.key().clone(), s.iter().map(|(k, v)| (k.0.key().clone(), *v)).collect()))
+                    .collect();
+                let nonce_reads: HashMap<Felt, Felt> =
+                    self.nonce_reads.lock().unwrap().iter().map(|(k, v)| (k.0.key().clone(), v.0)).collect();
+
                 Ok(ExecutionResult {
                     hash,
                     tx_type,
@@ -83,6 +97,8 @@ impl<D: MadaraStorageRead> ExecutionContext<D> {
                     execution_info,
                     gas_vector_computation_mode,
                     state_diff: state_diff.state_maps.into(),
+                    storage_reads,
+                    nonce_reads
                 })
             })
             .collect::<Result<Vec<_>, _>>();

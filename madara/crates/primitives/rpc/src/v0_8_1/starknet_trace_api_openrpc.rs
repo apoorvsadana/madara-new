@@ -123,10 +123,12 @@ pub struct SimulateTransactionsResult {
 }
 
 /// A single pair of transaction hash and corresponding trace
-#[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TraceBlockTransactionsResult {
     pub trace_root: TransactionTrace,
     pub transaction_hash: Felt,
+    pub storage_reads: HashMap<Felt, HashMap<Felt, Felt>>,
+    pub nonce_reads: HashMap<Felt, Felt>,
 }
 
 /// Trace of a single transaction returned by `starknet_traceTransaction`

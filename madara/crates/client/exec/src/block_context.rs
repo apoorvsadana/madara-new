@@ -18,7 +18,9 @@ use starknet_api::{
     state::StorageKey,
 };
 use std::{
-    cell::RefCell, collections::HashMap, sync::{Arc, Mutex, RwLock}
+    cell::RefCell,
+    collections::HashMap,
+    sync::{Arc, Mutex, RwLock},
 };
 
 fn block_context(
@@ -47,20 +49,27 @@ pub struct ExecutionContext<D: MadaraStorageRead> {
     pub protocol_version: StarknetVersion,
     pub storage_reads: Arc<Mutex<HashMap<ContractAddress, HashMap<StorageKey, Felt>>>>,
     pub nonce_reads: Arc<Mutex<HashMap<ContractAddress, Nonce>>>,
+    pub squashed_cache: Option<RwLock<StateCache>>,
 }
 
 impl<D: MadaraStorageRead> ExecutionContext<D> {
     pub fn clear_cache(&mut self) {
         self.storage_reads.lock().unwrap().clear();
         self.nonce_reads.lock().unwrap().clear();
-        let cache = RwLock::new(self.state.cache.borrow().clone());
+        let cache_from_previous_run = RwLock::new(self.state.cache.borrow().clone());
+        let new_cache = if let Some(squashed_cache) = &self.squashed_cache {
+            StateCache::squash_state_caches(vec![&squashed_cache.read().unwrap(), &cache_from_previous_run.read().unwrap()])
+        } else {
+            cache_from_previous_run.read().unwrap().clone()
+        };
         self.state = CachedState::new(BlockifierStateAdapter::new(
             self.state.state.view.clone(),
             self.state.state.block_number,
             self.storage_reads.clone(),
             self.nonce_reads.clone(),
-            cache,
+            RwLock::new(new_cache.clone()),
         ));
+        self.squashed_cache = Some(RwLock::new(new_cache.clone()));
     }
 }
 
@@ -102,6 +111,7 @@ impl<D: MadaraStorageRead> MadaraBlockViewExecutionExt<D> for MadaraBlockView<D>
             block_context: block_context(self.backend().chain_config(), block_info)?,
             storage_reads,
             nonce_reads,
+            squashed_cache: None
         })
     }
     fn new_execution_context_at_block_start(&self) -> Result<ExecutionContext<D>, Error> {
@@ -120,6 +130,7 @@ impl<D: MadaraStorageRead> MadaraBlockViewExecutionExt<D> for MadaraBlockView<D>
             block_context: block_context(self.backend().chain_config(), block_info)?, // ..but use the current block context
             storage_reads,
             nonce_reads,
+            squashed_cache: None
         })
     }
 }

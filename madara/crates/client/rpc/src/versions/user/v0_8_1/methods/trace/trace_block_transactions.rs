@@ -55,7 +55,7 @@ pub async fn trace_block_transactions_view(
             let trace_root =
                 execution_result_to_tx_trace_v0_8(&result, exec_context.block_context.versioned_constants())
                     .context("Converting execution infos to tx trace")?;
-            Ok(TraceBlockTransactionsResult { trace_root, transaction_hash })
+            Ok(TraceBlockTransactionsResult { trace_root, transaction_hash, storage_reads: result.storage_reads, nonce_reads: result.nonce_reads })
         })
         .collect::<Result<Vec<_>, StarknetRpcApiError>>()?;
 

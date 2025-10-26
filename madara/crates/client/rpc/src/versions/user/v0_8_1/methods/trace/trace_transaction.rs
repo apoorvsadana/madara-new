@@ -46,14 +46,9 @@ pub async fn trace_transaction(
     let trace = execution_result_to_tx_trace_v0_8(&execution_result, exec_context.block_context.versioned_constants())
         .context("Converting execution infos to tx trace")?;
 
-    let storage_reads: HashMap<Felt, HashMap<Felt, Felt>> = exec_context
-        .storage_reads
-        .lock()
-        .unwrap()
-        .iter()
-        .map(|(c, s)| (c.0.key().clone(), s.iter().map(|(k, v)| (k.0.key().clone(), *v)).collect()))
-        .collect();
-    let nonce_reads = exec_context.nonce_reads.lock().unwrap().iter().map(|(k, v)| (k.0.key().clone(), v.0)).collect();
-
-    Ok(TraceTransactionResult { trace, storage_reads, nonce_reads })
+    Ok(TraceTransactionResult {
+        trace,
+        storage_reads: execution_result.storage_reads,
+        nonce_reads: execution_result.nonce_reads,
+    })
 }

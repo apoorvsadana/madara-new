@@ -1,5 +1,7 @@
 #![allow(clippy::result_large_err)]
 
+use std::collections::HashMap;
+
 use blockifier::{
     state::cached_state::CommitmentStateDiff,
     transaction::{errors::TransactionExecutionError, objects::TransactionExecutionInfo},
@@ -87,4 +89,6 @@ pub struct ExecutionResult {
     pub execution_info: TransactionExecutionInfo,
     pub state_diff: CommitmentStateDiff,
     pub gas_vector_computation_mode: GasVectorComputationMode,
+    pub storage_reads: HashMap<Felt, HashMap<Felt, Felt>>,
+    pub nonce_reads: HashMap<Felt, Felt>,
 }
