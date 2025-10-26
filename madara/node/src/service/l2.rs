@@ -76,7 +76,7 @@ impl Service for SyncService {
             .trust_parent_hash(this.unsafe_starting_block_enabled)
             .trust_state_root(this.unsafe_starting_block_enabled);
         if this.disable_hash_and_commitment_checks {
-            block_validation_config.all_verifications_disabled(true);
+            block_validation_config = block_validation_config.all_verifications_disabled(true);
         };
         let importer = Arc::new(BlockImporter::new(this.db_backend.clone(), block_validation_config));
 
