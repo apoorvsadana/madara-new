@@ -13,6 +13,7 @@ use blockifier::{
 use futures::future::OptionFuture;
 use mc_db::MadaraBackend;
 use mc_exec::{execution::TxInfo, LayeredStateAdapter, MadaraBackendExecutionExt};
+use mp_block::header::GasPrices;
 use mp_convert::{Felt, ToFelt};
 use mp_utils::append_batch::AppendBatchParams;
 use rayon::prelude::*;
@@ -238,14 +239,19 @@ impl ExecutorThread {
         state: ExecutorStateNewBlock,
         previous_l2_gas_used: u128,
         executor_initial_cache: Option<ExecutorInitialCache>,
+        override_gas_price: Option<GasPrices>,
     ) -> anyhow::Result<ExecutorStateExecuting> {
         let previous_l2_gas_price = state.state_adaptor.latest_gas_prices().strk_l2_gas_price;
-        let exec_ctx = create_execution_context(
+        let mut exec_ctx = create_execution_context(
             &self.backend,
             state.state_adaptor.block_n(),
             previous_l2_gas_price,
             previous_l2_gas_used,
         )?;
+
+        if let Some(override_gas_price) = override_gas_price {
+            exec_ctx.gas_prices = override_gas_price;
+        }
 
         // Create the TransactionExecution, but reuse the layered_state_adapter.
         let mut executor =
@@ -336,6 +342,7 @@ impl ExecutorThread {
         let mut l2_gas_consumed_block = 0;
         let mut append_batch_state: Option<AppendBatchState> = None;
         let mut executor_initial_cache: Option<ExecutorInitialCache> = None;
+        let mut override_gas_price: Option<GasPrices> = None;
 
         tracing::debug!("Starting executor thread.");
 
@@ -451,6 +458,14 @@ impl ExecutorThread {
                                     initial_nonces: append_batch_params.initial_nonces,
                                     current_nonces: append_batch_params.current_nonces,
                                 });
+                                override_gas_price = Some(GasPrices {
+                                    eth_l1_gas_price: append_batch_params.gas_prices.eth_l1_gas_price,
+                                    strk_l1_gas_price: append_batch_params.gas_prices.strk_l1_gas_price,
+                                    eth_l1_data_gas_price: append_batch_params.gas_prices.eth_l1_data_gas_price,
+                                    strk_l1_data_gas_price: append_batch_params.gas_prices.strk_l1_data_gas_price,
+                                    eth_l2_gas_price: append_batch_params.gas_prices.eth_l2_gas_price,
+                                    strk_l2_gas_price: append_batch_params.gas_prices.strk_l2_gas_price,
+                                });
 
                                 let _ = callback.send(Ok(()));
                                 Default::default()
@@ -489,7 +504,12 @@ impl ExecutorThread {
                 ExecutorThreadState::NewBlock(state_new_block) => {
                     // Create new execution state.
                     let execution_state = self
-                        .create_execution_state(state_new_block, l2_gas_consumed_block, executor_initial_cache.take())
+                        .create_execution_state(
+                            state_new_block,
+                            l2_gas_consumed_block,
+                            executor_initial_cache.take(),
+                            override_gas_price.take(),
+                        )
                         .context("Creating execution state")?;
                     l2_gas_consumed_block = 0;
 
