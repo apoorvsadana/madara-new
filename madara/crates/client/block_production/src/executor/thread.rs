@@ -381,11 +381,11 @@ impl ExecutorThread {
                                                     let stored_value = preconfirmed_view
                                                         .get_contract_storage(contract_address, key)?;
                                                     if stored_value.unwrap_or_default() != *value {
-                                                        // Err(anyhow::anyhow!(
-                                                        //     "Initial storage value mismatch for contract {:#x} key {:#x}: expected {:#x} but got {:?}",
-                                                        //     contract_address, key, value, stored_value
-                                                        // ))
-                                                        anyhow::Ok(())
+                                                        Err(anyhow::anyhow!(
+                                                            "Initial storage value mismatch for contract {:#x} key {:#x}: expected {:#x} but got {:?}",
+                                                            contract_address, key, value, stored_value
+                                                        ))
+                                                        // anyhow::Ok(())
                                                     } else {
                                                         Ok(())
                                                     }
@@ -401,11 +401,11 @@ impl ExecutorThread {
                                                 let stored_nonce =
                                                     preconfirmed_view.get_contract_nonce(contract_address)?;
                                                 if stored_nonce.unwrap_or_default() != *nonce {
-                                                    // Err(anyhow::anyhow!(
-                                                    //     "Initial nonce mismatch for contract {:#x}: expected {:#x} but got {:?}",
-                                                    //     contract_address, nonce, stored_nonce
-                                                    // ))
-                                                    anyhow::Ok(())
+                                                    Err(anyhow::anyhow!(
+                                                        "Initial nonce mismatch for contract {:#x}: expected {:#x} but got {:?}",
+                                                        contract_address, nonce, stored_nonce
+                                                    ))
+                                                    // anyhow::Ok(())
                                                 } else {
                                                     Ok(())
                                                 }
