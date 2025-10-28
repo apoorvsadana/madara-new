@@ -369,6 +369,7 @@ impl ExecutorThread {
                             }
                             super::ExecutorCommand::AppendBatch(append_batch_params, callback) => {
                                 // validate if initial reads by the batch are correct in parallel
+                                info!("Received append_batch command, validating initial reads");
                                 let preconfirmed_view = self.backend.view_on_latest();
 
                                 // Run storage and nonce validation in parallel
@@ -387,6 +388,7 @@ impl ExecutorThread {
                                                         ))
                                                         // anyhow::Ok(())
                                                     } else {
+                                                        tracing::debug!("Initial storage value matched for contract {:#x} key {:#x}", contract_address, key);
                                                         Ok(())
                                                     }
                                                 })
@@ -407,6 +409,7 @@ impl ExecutorThread {
                                                     ))
                                                     // anyhow::Ok(())
                                                 } else {
+                                                    tracing::debug!("Initial nonce matched for contract {:#x}", contract_address);
                                                     Ok(())
                                                 }
                                             },
@@ -418,6 +421,8 @@ impl ExecutorThread {
                                 // Handle both results
                                 storage_result?;
                                 nonce_result?;
+
+                                info!("Initial reads validated, proceeding to append batch");
 
                                 // If we're in executing state, close the current block
                                 if let ExecutorThreadState::Executing(ref mut execution_state) = state {
