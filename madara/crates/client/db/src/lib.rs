@@ -56,6 +56,7 @@ use mp_transactions::validated::ValidatedTransaction;
 use mp_transactions::L1HandlerTransactionWithFee;
 use prelude::*;
 use std::path::Path;
+use std::time::Instant;
 
 mod db_version;
 mod prelude;
@@ -510,6 +511,7 @@ impl<D: MadaraStorage> MadaraBackendWriter<D> {
             Felt::ZERO // genesis
         };
 
+        let start_commitments = Instant::now();
         let commitments = BlockCommitments::compute(
             &CommitmentComputationContext {
                 protocol_version: self.inner.chain_config.latest_protocol_version,
@@ -519,13 +521,33 @@ impl<D: MadaraStorage> MadaraBackendWriter<D> {
             &block.state_diff,
             &block.events,
         );
+        let commitments_ms = start_commitments.elapsed().as_millis();
+        tracing::info!(
+            "write_new_confirmed_inner: computed commitments block_n={} ms={}",
+            block.header.block_number,
+            commitments_ms
+        );
 
         // Global state root and block hash.
+        let start_state_root = Instant::now();
         let global_state_root = self.apply_to_global_trie(block.header.block_number, [&block.state_diff])?;
+        let state_root_ms = start_state_root.elapsed().as_millis();
+        tracing::info!(
+            "write_new_confirmed_inner: computed state root block_n={} ms={}",
+            block.header.block_number,
+            state_root_ms
+        );
 
         let header =
             block.header.clone().into_confirmed_header(parent_block_hash, commitments.clone(), global_state_root);
+        let start_hash = Instant::now();
         let block_hash = header.compute_hash(self.inner.chain_config.chain_id.to_felt(), pre_v0_13_2_hash_override);
+        let hash_ms = start_hash.elapsed().as_millis();
+        tracing::info!(
+            "write_new_confirmed_inner: computed block hash block_n={} ms={}",
+            block.header.block_number,
+            hash_ms
+        );
 
         // Save the block.
 
