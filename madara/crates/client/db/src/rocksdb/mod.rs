@@ -54,6 +54,18 @@ pub use options::{RocksDBConfig, StatsLevel};
 
 const DB_UPDATES_BATCH_SIZE: usize = 1024;
 
+impl RocksDBStorageInner {
+    /// Returns the batch size for DB updates/reads. Can be overridden via the
+    /// DB_UPDATES_BATCH_SIZE env var for benchmarking/tuning.
+    fn batch_size(&self) -> usize {
+        std::env::var("DB_UPDATES_BATCH_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DB_UPDATES_BATCH_SIZE)
+    }
+}
+
 fn bincode_opts() -> impl bincode::Options {
     bincode::DefaultOptions::new()
 }
@@ -258,10 +270,20 @@ impl MadaraStorageRead for RocksDBStorage {
             format!("Getting storage value for block_n={block_n} contract_address={contract_address:#x} key={key:#x}")
         })
     }
+    fn get_storage_at_many(&self, block_n: u64, queries: &[(Felt, Felt)]) -> Result<Vec<Option<Felt>>> {
+        self.inner
+            .get_storage_at_many(block_n, queries)
+            .with_context(|| format!("Getting many storage values for block_n={block_n}, n_queries={}", queries.len()))
+    }
     fn get_contract_nonce_at(&self, block_n: u64, contract_address: &Felt) -> Result<Option<Felt>> {
         self.inner
             .get_contract_nonce_at(block_n, contract_address)
             .with_context(|| format!("Getting nonce for block_n={block_n} contract_address={contract_address:#x}"))
+    }
+    fn get_contract_nonce_at_many(&self, block_n: u64, contract_addresses: &[Felt]) -> Result<Vec<Option<Felt>>> {
+        self.inner.get_contract_nonce_at_many(block_n, contract_addresses).with_context(|| {
+            format!("Getting many nonces for block_n={block_n}, n_addresses={}", contract_addresses.len())
+        })
     }
     fn get_contract_class_hash_at(&self, block_n: u64, contract_address: &Felt) -> Result<Option<Felt>> {
         self.inner

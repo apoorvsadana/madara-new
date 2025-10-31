@@ -124,6 +124,94 @@ impl RocksDBStorageInner {
     }
 
     #[tracing::instrument(skip(self))]
+    pub(super) fn get_storage_at_many(
+        &self,
+        block_n: u64,
+        queries: &[(Felt, Felt)], // (contract_address, storage_key)
+    ) -> Result<Vec<Option<Felt>>> {
+        let block_n_u32 = u32::try_from(block_n).unwrap_or(u32::MAX); // We can't store blocks past u32::MAX.
+        let prefixes: Vec<[u8; STORAGE_KEY_LEN]> = queries
+            .iter()
+            .map(|(contract_address, key)| make_storage_column_key(contract_address, key, block_n_u32))
+            .collect();
+
+        // Process in parallel chunks, similar to write operations
+        let results: Vec<Vec<Option<Felt>>> = prefixes
+            .par_chunks(self.batch_size())
+            .map_init(
+                || self.get_column(CONTRACT_STORAGE_COLUMN),
+                |col, chunk| {
+                    let start = std::time::Instant::now();
+                    let mut chunk_results = Vec::with_capacity(chunk.len());
+                    for prefix in chunk {
+                        let mut options = ReadOptions::default();
+                        options.set_prefix_same_as_start(true);
+                        let mode = IteratorMode::From(prefix, rocksdb::Direction::Forward);
+                        let mut iter = DBIterator::new_cf(&self.db, col, options, mode)
+                            .into_iter_values(|bytes| super::deserialize(bytes));
+                        let result = iter.next().transpose()?.transpose()?;
+                        chunk_results.push(result);
+                    }
+                    tracing::info!(
+                        op = "get_storage_at_many",
+                        items = chunk.len(),
+                        ms = start.elapsed().as_millis() as u64,
+                        "processed chunk"
+                    );
+                    Ok::<Vec<Option<Felt>>, anyhow::Error>(chunk_results)
+                },
+            )
+            .collect::<Result<Vec<_>>>()?;
+
+        // Flatten the nested Vec<Vec<Option<Felt>>> into Vec<Option<Felt>>
+        Ok(results.into_iter().flatten().collect())
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub(super) fn get_contract_nonce_at_many(
+        &self,
+        block_n: u64,
+        contract_addresses: &[Felt],
+    ) -> Result<Vec<Option<Felt>>> {
+        let block_n_u32 = u32::try_from(block_n).unwrap_or(u32::MAX); // We can't store blocks past u32::MAX.
+        let prefixes: Vec<[u8; CONTRACT_KEY_LEN]> = contract_addresses
+            .iter()
+            .map(|contract_address| make_contract_column_key(contract_address, block_n_u32))
+            .collect();
+
+        // Process in parallel chunks, similar to write operations
+        let results: Vec<Vec<Option<Felt>>> = prefixes
+            .par_chunks(self.batch_size())
+            .map_init(
+                || self.get_column(CONTRACT_NONCE_COLUMN),
+                |col, chunk| {
+                    let start = std::time::Instant::now();
+                    let mut chunk_results = Vec::with_capacity(chunk.len());
+                    for prefix in chunk {
+                        let mut options = ReadOptions::default();
+                        options.set_prefix_same_as_start(true);
+                        let mode = IteratorMode::From(prefix, rocksdb::Direction::Forward);
+                        let mut iter = DBIterator::new_cf(&self.db, col, options, mode)
+                            .into_iter_values(|bytes| super::deserialize(bytes));
+                        let result = iter.next().transpose()?.transpose()?;
+                        chunk_results.push(result);
+                    }
+                    tracing::info!(
+                        op = "get_contract_nonce_at_many",
+                        items = chunk.len(),
+                        ms = start.elapsed().as_millis() as u64,
+                        "processed chunk"
+                    );
+                    Ok::<Vec<Option<Felt>>, anyhow::Error>(chunk_results)
+                },
+            )
+            .collect::<Result<Vec<_>>>()?;
+
+        // Flatten the nested Vec<Vec<Option<Felt>>> into Vec<Option<Felt>>
+        Ok(results.into_iter().flatten().collect())
+    }
+
+    #[tracing::instrument(skip(self))]
     pub(super) fn get_contract_class_hash_at(&self, block_n: u64, contract_address: &Felt) -> Result<Option<Felt>> {
         let block_n = u32::try_from(block_n).unwrap_or(u32::MAX); // We can't store blocks past u32::MAX.
         let prefix = make_contract_column_key(contract_address, block_n);

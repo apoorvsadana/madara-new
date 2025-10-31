@@ -167,6 +167,90 @@ impl<D: MadaraStorageRead> MadaraStateView<D> {
         self.backend().db.get_contract_nonce_at(block_n, contract_address)
     }
 
+    pub fn get_contract_storage_many(&self, queries: &[(Felt, Felt)]) -> Result<Vec<Option<Felt>>> {
+        // Prepare preconfirmed overlay results and collect DB queries for the rest
+        let mut results: Vec<Option<Felt>> = vec![None; queries.len()];
+        let mut db_indices: Vec<usize> = Vec::new();
+        let mut db_queries: Vec<(Felt, Felt)> = Vec::new();
+
+        if self.block_view_on_latest().and_then(|v| v.as_preconfirmed()).is_some() {
+            for (i, (addr, key)) in queries.iter().enumerate() {
+                if let Some(v) =
+                    self.lookup_preconfirmed_state(|(_, s)| s.state_diff.storage_diffs.get(&(*addr, *key)).copied())
+                {
+                    results[i] = Some(v);
+                } else {
+                    db_indices.push(i);
+                    db_queries.push((*addr, *key));
+                }
+            }
+        } else {
+            db_indices.extend(0..queries.len());
+            db_queries.extend_from_slice(queries);
+        }
+
+        let n_memory = results.iter().filter(|v| v.is_some()).count();
+        let n_db = db_queries.len();
+        tracing::info!(
+            op = "get_contract_storage_many_split",
+            total = queries.len(),
+            memory = n_memory,
+            db = n_db,
+            "batch split between memory and db"
+        );
+
+        if !db_queries.is_empty() {
+            let Some(block_n) = self.latest_confirmed_block_n() else { return Ok(results) };
+            let fetched = self.backend().db.get_storage_at_many(block_n, &db_queries)?;
+            for (idx, val) in db_indices.into_iter().zip(fetched.into_iter()) {
+                results[idx] = val;
+            }
+        }
+
+        Ok(results)
+    }
+
+    pub fn get_contract_nonce_many(&self, addresses: &[Felt]) -> Result<Vec<Option<Felt>>> {
+        // Prepare preconfirmed overlay results and collect DB queries for the rest
+        let mut results: Vec<Option<Felt>> = vec![None; addresses.len()];
+        let mut db_indices: Vec<usize> = Vec::new();
+        let mut db_addrs: Vec<Felt> = Vec::new();
+
+        if self.block_view_on_latest().and_then(|v| v.as_preconfirmed()).is_some() {
+            for (i, addr) in addresses.iter().enumerate() {
+                if let Some(v) = self.lookup_preconfirmed_state(|(_, s)| s.state_diff.nonces.get(addr).copied()) {
+                    results[i] = Some(v);
+                } else {
+                    db_indices.push(i);
+                    db_addrs.push(*addr);
+                }
+            }
+        } else {
+            db_indices.extend(0..addresses.len());
+            db_addrs.extend_from_slice(addresses);
+        }
+
+        let n_memory = results.iter().filter(|v| v.is_some()).count();
+        let n_db = db_addrs.len();
+        tracing::info!(
+            op = "get_contract_nonce_many_split",
+            total = addresses.len(),
+            memory = n_memory,
+            db = n_db,
+            "batch split between memory and db"
+        );
+
+        if !db_addrs.is_empty() {
+            let Some(block_n) = self.latest_confirmed_block_n() else { return Ok(results) };
+            let fetched = self.backend().db.get_contract_nonce_at_many(block_n, &db_addrs)?;
+            for (idx, val) in db_indices.into_iter().zip(fetched.into_iter()) {
+                results[idx] = val;
+            }
+        }
+
+        Ok(results)
+    }
+
     pub fn get_contract_class_hash(&self, contract_address: &Felt) -> Result<Option<Felt>> {
         if let Some(res) =
             self.lookup_preconfirmed_state(|(_, s)| s.state_diff.contract_class_hashes.get(contract_address).copied())

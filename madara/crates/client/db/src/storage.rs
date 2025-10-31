@@ -97,7 +97,9 @@ pub trait MadaraStorageRead: Send + Sync + 'static {
     // State
 
     fn get_storage_at(&self, block_n: u64, contract_address: &Felt, key: &Felt) -> Result<Option<Felt>>;
+    fn get_storage_at_many(&self, block_n: u64, queries: &[(Felt, Felt)]) -> Result<Vec<Option<Felt>>>;
     fn get_contract_nonce_at(&self, block_n: u64, contract_address: &Felt) -> Result<Option<Felt>>;
+    fn get_contract_nonce_at_many(&self, block_n: u64, addresses: &[Felt]) -> Result<Vec<Option<Felt>>>;
     fn get_contract_class_hash_at(&self, block_n: u64, contract_address: &Felt) -> Result<Option<Felt>>;
     fn is_contract_deployed_at(&self, block_n: u64, contract_address: &Felt) -> Result<bool>;
 

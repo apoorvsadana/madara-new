@@ -15,7 +15,6 @@ use mc_db::MadaraBackend;
 use mc_exec::{execution::TxInfo, LayeredStateAdapter, MadaraBackendExecutionExt};
 use mp_block::header::GasPrices;
 use mp_convert::{Felt, ToFelt};
-use mp_utils::append_batch::AppendBatchParams;
 use rayon::prelude::*;
 use starknet_api::{contract_class::ContractClass, core::ContractAddress, hash::StarkHash, state::StorageKey};
 use starknet_api::{
@@ -372,48 +371,54 @@ impl ExecutorThread {
                                 info!("Received append_batch command, validating initial reads");
                                 let preconfirmed_view = self.backend.view_on_latest();
 
-                                // Run storage and nonce validation in parallel
+                                // Run storage and nonce validation in parallel using batch reads
                                 let (storage_result, nonce_result) = rayon::join(
                                     || -> anyhow::Result<()> {
-                                        // Validate storage in parallel
-                                        append_batch_params.initial_storage.par_iter().try_for_each(
-                                            |(contract_address, storage)| {
-                                                storage.par_iter().try_for_each(|(key, value)| {
-                                                    let stored_value = preconfirmed_view
-                                                        .get_contract_storage(contract_address, key)?;
-                                                    if stored_value.unwrap_or_default() != *value {
-                                                        Err(anyhow::anyhow!(
-                                                            "Initial storage value mismatch for contract {:#x} key {:#x}: expected {:#x} but got {:?}",
-                                                            contract_address, key, value, stored_value
-                                                        ))
-                                                        // anyhow::Ok(())
-                                                    } else {
-                                                        tracing::debug!("Initial storage value matched for contract {:#x} key {:#x}", contract_address, key);
-                                                        Ok(())
-                                                    }
-                                                })
-                                            },
-                                        )?;
+                                        // Flatten storage queries
+                                        let mut flat_queries: Vec<(Felt, Felt)> = Vec::new();
+                                        let mut expected: Vec<(Felt, Felt, Felt)> = Vec::new();
+                                        for (addr, storage_map) in &append_batch_params.initial_storage {
+                                            for (key, value) in storage_map {
+                                                flat_queries.push((*addr, *key));
+                                                expected.push((*addr, *key, *value));
+                                            }
+                                        }
+                                        let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
+                                        for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
+                                            if got.unwrap_or_default() != exp {
+                                                anyhow::bail!(
+                                                    "Initial storage value mismatch for contract {addr:#x} key {key:#x}: expected {exp:#x} but got {:?}",
+                                                    got
+                                                );
+                                            } else {
+                                                tracing::debug!(
+                                                    "Initial storage value matched for contract {:#x} key {:#x}",
+                                                    addr,
+                                                    key
+                                                );
+                                            }
+                                        }
                                         Ok(())
                                     },
                                     || -> anyhow::Result<()> {
-                                        // Validate nonces in parallel
-                                        append_batch_params.initial_nonces.par_iter().try_for_each(
-                                            |(contract_address, nonce)| {
-                                                let stored_nonce =
-                                                    preconfirmed_view.get_contract_nonce(contract_address)?;
-                                                if stored_nonce.unwrap_or_default() != *nonce {
-                                                    Err(anyhow::anyhow!(
-                                                        "Initial nonce mismatch for contract {:#x}: expected {:#x} but got {:?}",
-                                                        contract_address, nonce, stored_nonce
-                                                    ))
-                                                    // anyhow::Ok(())
-                                                } else {
-                                                    tracing::debug!("Initial nonce matched for contract {:#x}", contract_address);
-                                                    Ok(())
-                                                }
-                                            },
-                                        )?;
+                                        // Flatten nonce queries
+                                        let addrs: Vec<Felt> =
+                                            append_batch_params.initial_nonces.keys().copied().collect();
+                                        let expected: Vec<(Felt, Felt)> = addrs
+                                            .iter()
+                                            .map(|a| (*a, *append_batch_params.initial_nonces.get(a).expect("present")))
+                                            .collect();
+                                        let fetched = preconfirmed_view.get_contract_nonce_many(&addrs)?;
+                                        for ((addr, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
+                                            if got.unwrap_or_default() != exp {
+                                                anyhow::bail!(
+                                                    "Initial nonce mismatch for contract {addr:#x}: expected {exp:#x} but got {:?}",
+                                                    got
+                                                );
+                                            } else {
+                                                tracing::debug!("Initial nonce matched for contract {:#x}", addr);
+                                            }
+                                        }
                                         Ok(())
                                     },
                                 );
