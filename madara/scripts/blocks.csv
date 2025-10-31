@@ -1,0 +1,5 @@
+block,tx_executed,tx_added,gas_used,block_full,block_empty,force_close,initial_nonce_validation_ms,nonce_chunks_ms_sum,initial_storage_validation_ms,storage_chunks_ms_sum,storage_total_queries,append_batch_rpc_ms,executed_added_duration_ms,commitments_ms,state_root_ms,block_hash_ms,close_block_ms
+1089727,117,117,2781602120,true,false,true,1,1.0,202,834.0,9331,266.448,0.369545,9,124,0,
+1089728,112,112,2789666000,true,false,true,0,0.0,304,2324.0,9422,365.531,0.425616,9,141,0,194.281775
+1089729,105,105,2881460705,true,false,true,0,0.0,222,1624.0,9103,285.42,0.449865,9,173,0,222.073021
+1089730,101,101,3165943285,true,false,true,3,3.0,137,791.0,7904,202.274,0.322749,8,145,0,192.793522

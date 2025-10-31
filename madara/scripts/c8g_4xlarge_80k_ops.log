@@ -1,0 +1,126 @@
+1089727
+
+Received append_batch command, validating initial reads
+[2025-10-31 10:18:19:389] INFO get_contract_nonce_many_split: batch split between memory and db: total=2 memory=0 db=2
+[2025-10-31 10:18:19:390] INFO get_contract_storage_many_split: batch split between memory and db: total=9331 memory=0 db=9331
+[2025-10-31 10:18:19:391] INFO get_contract_nonce_at_many: processed chunk items=2 ms=1
+[2025-10-31 10:18:19:391] INFO append_batch nonce validation: queries=2 ms=1
+[2025-10-31 10:18:19:449] INFO get_storage_at_many: processed chunk items=1024 ms=55
+[2025-10-31 10:18:19:450] INFO get_storage_at_many: processed chunk items=1024 ms=56
+[2025-10-31 10:18:19:450] INFO get_storage_at_many: processed chunk items=1024 ms=56
+[2025-10-31 10:18:19:451] INFO get_storage_at_many: processed chunk items=1024 ms=57
+[2025-10-31 10:18:19:451] INFO get_storage_at_many: processed chunk items=1024 ms=57
+[2025-10-31 10:18:19:451] INFO get_storage_at_many: processed chunk items=1024 ms=57
+[2025-10-31 10:18:19:451] INFO get_storage_at_many: processed chunk items=1024 ms=57
+[2025-10-31 10:18:19:508] INFO get_storage_at_many: processed chunk items=1024 ms=114
+[2025-10-31 10:18:19:521] INFO get_storage_at_many: processed chunk items=115 ms=127
+[2025-10-31 10:18:19:592] INFO get_storage_at_many: processed chunk items=1024 ms=198
+[2025-10-31 10:18:19:592] INFO append_batch storage validation: queries=9331 ms=202
+[2025-10-31 10:18:19:593] INFO Initial reads validated, proceeding to append batch
+[2025-10-31 10:18:19:593] INFO Preparing to execute append batch with 117 transactions
+[2025-10-31 10:18:19:593] RPC madara_V0_1_0_appendBatch 200 38 bytes - 266.448ms
+[2025-10-31 10:18:19:597] INFO Starting new block 1089727 with previous gas used 0
+[2025-10-31 10:18:19:597] INFO Starting append batch execution with 117 transactions
+[2025-10-31 10:18:19:598] INFO Execution stats: executed=117, added=117, reverted=0, rejected=0, gas=2781602120, declared_classes=0
+[2025-10-31 10:18:19:598] INFO Block status: full=true, empty=false, force_close=true
+[2025-10-31 10:18:19:598] INFO Ending block 1089727 (force_close=true, block_full=true, block_time_deadline_reached=false, gas_used=2781602120)
+[2025-10-31 10:18:19:598] INFO Block 1089727 final weights: BouncerWeights { l1_gas: 0, message_segment_length: 0, n_events: 0, state_diff_size: 0, sierra_gas: GasAmount(0), n_txs: 0, proving_gas: GasAmount(0) }.
+[2025-10-31 10:18:19:601] INFO 🧮 Executed and added 117 transaction(s) to the preconfirmed block at height 1089727 - 369.545µs
+[2025-10-31 10:18:19:666] INFO write_new_confirmed_inner: computed commitments block_n=1089727 ms=9
+[2025-10-31 10:18:19:790] INFO write_new_confirmed_inner: computed state root block_n=1089727 ms=124
+[2025-10-31 10:18:19:790] INFO write_new_confirmed_inner: computed block hash block_n=1089727 ms=0
+
+
+1089728
+[2025-10-31 10:19:18:923] INFO Received append_batch command, validating initial reads
+[2025-10-31 10:19:18:923] INFO get_contract_nonce_many_split: batch split between memory and db: total=1 memory=0 db=1
+[2025-10-31 10:19:18:924] INFO get_contract_nonce_at_many: processed chunk items=1 ms=0
+[2025-10-31 10:19:18:924] INFO append_batch nonce validation: queries=1 ms=0
+[2025-10-31 10:19:18:924] INFO get_contract_storage_many_split: batch split between memory and db: total=9422 memory=0 db=9422
+[2025-10-31 10:19:18:944] INFO get_storage_at_many: processed chunk items=1024 ms=17
+[2025-10-31 10:19:19:017] INFO get_storage_at_many: processed chunk items=206 ms=90
+[2025-10-31 10:19:19:191] INFO get_storage_at_many: processed chunk items=1024 ms=264
+[2025-10-31 10:19:19:194] INFO get_storage_at_many: processed chunk items=1024 ms=267
+[2025-10-31 10:19:19:198] INFO get_storage_at_many: processed chunk items=1024 ms=271
+[2025-10-31 10:19:19:200] INFO get_storage_at_many: processed chunk items=1024 ms=273
+[2025-10-31 10:19:19:201] INFO get_storage_at_many: processed chunk items=1024 ms=274
+[2025-10-31 10:19:19:208] INFO get_storage_at_many: processed chunk items=1024 ms=281
+[2025-10-31 10:19:19:213] INFO get_storage_at_many: processed chunk items=1024 ms=286
+[2025-10-31 10:19:19:228] INFO get_storage_at_many: processed chunk items=1024 ms=301
+[2025-10-31 10:19:19:228] INFO append_batch storage validation: queries=9422 ms=304
+[2025-10-31 10:19:19:228] INFO Initial reads validated, proceeding to append batch
+[2025-10-31 10:19:19:228] INFO Preparing to execute append batch with 112 transactions
+[2025-10-31 10:19:19:228] RPC madara_V0_1_0_appendBatch 200 38 bytes - 365.531ms
+[2025-10-31 10:19:19:231] INFO Starting new block 1089728 with previous gas used 0
+[2025-10-31 10:19:19:231] INFO Starting append batch execution with 112 transactions
+[2025-10-31 10:19:19:231] INFO Execution stats: executed=112, added=112, reverted=0, rejected=0, gas=2789666000, declared_classes=0
+[2025-10-31 10:19:19:231] INFO Block status: full=true, empty=false, force_close=true
+[2025-10-31 10:19:19:231] INFO Ending block 1089728 (force_close=true, block_full=true, block_time_deadline_reached=false, gas_used=2789666000)
+[2025-10-31 10:19:19:231] INFO Block 1089728 final weights: BouncerWeights { l1_gas: 0, message_segment_length: 0, n_events: 0, state_diff_size: 0, sierra_gas: GasAmount(0), n_txs: 0, proving_gas: GasAmount(0) }.
+[2025-10-31 10:19:19:234] INFO 🧮 Executed and added 112 transaction(s) to the preconfirmed block at height 1089728 - 425.616µs
+[2025-10-31 10:19:19:448] INFO write_new_confirmed_inner: computed commitments block_n=1089728 ms=9
+[2025-10-31 10:19:19:590] INFO write_new_confirmed_inner: computed state root block_n=1089728 ms=141
+[2025-10-31 10:19:19:590] INFO write_new_confirmed_inner: computed block hash block_n=1089728 ms=0
+[2025-10-31 10:19:19:596] INFO ⛏️  Closed block #1089728 with 112 transactions - 194.281775ms
+
+
+1089729
+[2025-10-31 10:20:08:904] INFO Received append_batch command, validating initial reads
+[2025-10-31 10:20:08:904] INFO get_contract_nonce_many_split: batch split between memory and db: total=1 memory=0 db=1
+[2025-10-31 10:20:08:904] INFO get_contract_nonce_at_many: processed chunk items=1 ms=0
+[2025-10-31 10:20:08:904] INFO append_batch nonce validation: queries=1 ms=0
+[2025-10-31 10:20:08:904] INFO get_contract_storage_many_split: batch split between memory and db: total=9103 memory=0 db=9103
+[2025-10-31 10:20:08:930] INFO get_storage_at_many: processed chunk items=1024 ms=23
+[2025-10-31 10:20:09:082] INFO get_storage_at_many: processed chunk items=911 ms=175
+[2025-10-31 10:20:09:086] INFO get_storage_at_many: processed chunk items=1024 ms=178
+[2025-10-31 10:20:09:102] INFO get_storage_at_many: processed chunk items=1024 ms=194
+[2025-10-31 10:20:09:109] INFO get_storage_at_many: processed chunk items=1024 ms=202
+[2025-10-31 10:20:09:110] INFO get_storage_at_many: processed chunk items=1024 ms=203
+[2025-10-31 10:20:09:121] INFO get_storage_at_many: processed chunk items=1024 ms=213
+[2025-10-31 10:20:09:124] INFO get_storage_at_many: processed chunk items=1024 ms=217
+[2025-10-31 10:20:09:127] INFO get_storage_at_many: processed chunk items=1024 ms=219
+[2025-10-31 10:20:09:127] INFO append_batch storage validation: queries=9103 ms=222
+[2025-10-31 10:20:09:127] INFO Initial reads validated, proceeding to append batch
+[2025-10-31 10:20:09:127] INFO Preparing to execute append batch with 105 transactions
+[2025-10-31 10:20:09:127] RPC madara_V0_1_0_appendBatch 200 38 bytes - 285.420ms
+[2025-10-31 10:20:09:129] INFO Starting new block 1089729 with previous gas used 0
+[2025-10-31 10:20:09:129] INFO Starting append batch execution with 105 transactions
+[2025-10-31 10:20:09:130] INFO Execution stats: executed=105, added=105, reverted=0, rejected=0, gas=2881460705, declared_classes=0
+[2025-10-31 10:20:09:130] INFO Block status: full=true, empty=false, force_close=true
+[2025-10-31 10:20:09:130] INFO Ending block 1089729 (force_close=true, block_full=true, block_time_deadline_reached=false, gas_used=2881460705)
+[2025-10-31 10:20:09:130] INFO Block 1089729 final weights: BouncerWeights { l1_gas: 0, message_segment_length: 0, n_events: 0, state_diff_size: 0, sierra_gas: GasAmount(0), n_txs: 0, proving_gas: GasAmount(0) }.
+[2025-10-31 10:20:09:132] INFO 🧮 Executed and added 105 transaction(s) to the preconfirmed block at height 1089729 - 449.865µs
+[2025-10-31 10:20:09:300] INFO write_new_confirmed_inner: computed commitments block_n=1089729 ms=9
+[2025-10-31 10:20:09:473] INFO write_new_confirmed_inner: computed state root block_n=1089729 ms=173
+[2025-10-31 10:20:09:473] INFO write_new_confirmed_inner: computed block hash block_n=1089729 ms=0
+[2025-10-31 10:20:09:479] INFO ⛏️  Closed block #1089729 with 105 transactions - 222.073021ms
+
+1089730
+[2025-10-31 10:20:44:157] INFO Received append_batch command, validating initial reads
+[2025-10-31 10:20:44:157] INFO get_contract_nonce_many_split: batch split between memory and db: total=2 memory=0 db=2
+[2025-10-31 10:20:44:157] INFO get_contract_storage_many_split: batch split between memory and db: total=7904 memory=0 db=7904
+[2025-10-31 10:20:44:160] INFO get_contract_nonce_at_many: processed chunk items=2 ms=3
+[2025-10-31 10:20:44:160] INFO append_batch nonce validation: queries=2 ms=3
+[2025-10-31 10:20:44:175] INFO get_storage_at_many: processed chunk items=1024 ms=15
+[2025-10-31 10:20:44:248] INFO get_storage_at_many: processed chunk items=736 ms=88
+[2025-10-31 10:20:44:261] INFO get_storage_at_many: processed chunk items=1024 ms=101
+[2025-10-31 10:20:44:265] INFO get_storage_at_many: processed chunk items=1024 ms=105
+[2025-10-31 10:20:44:266] INFO get_storage_at_many: processed chunk items=1024 ms=106
+[2025-10-31 10:20:44:279] INFO get_storage_at_many: processed chunk items=1024 ms=119
+[2025-10-31 10:20:44:283] INFO get_storage_at_many: processed chunk items=1024 ms=123
+[2025-10-31 10:20:44:294] INFO get_storage_at_many: processed chunk items=1024 ms=134
+[2025-10-31 10:20:44:294] INFO append_batch storage validation: queries=7904 ms=137
+[2025-10-31 10:20:44:294] INFO Initial reads validated, proceeding to append batch
+[2025-10-31 10:20:44:294] INFO Preparing to execute append batch with 101 transactions
+[2025-10-31 10:20:44:294] RPC madara_V0_1_0_appendBatch 200 38 bytes - 202.274ms
+[2025-10-31 10:20:44:297] INFO Starting new block 1089730 with previous gas used 0
+[2025-10-31 10:20:44:297] INFO Starting append batch execution with 101 transactions
+[2025-10-31 10:20:44:297] INFO Execution stats: executed=101, added=101, reverted=0, rejected=0, gas=3165943285, declared_classes=0
+[2025-10-31 10:20:44:297] INFO Block status: full=true, empty=false, force_close=true
+[2025-10-31 10:20:44:297] INFO Ending block 1089730 (force_close=true, block_full=true, block_time_deadline_reached=false, gas_used=3165943285)
+[2025-10-31 10:20:44:297] INFO Block 1089730 final weights: BouncerWeights { l1_gas: 0, message_segment_length: 0, n_events: 0, state_diff_size: 0, sierra_gas: GasAmount(0), n_txs: 0, proving_gas: GasAmount(0) }.
+[2025-10-31 10:20:44:299] INFO 🧮 Executed and added 101 transaction(s) to the preconfirmed block at height 1089730 - 322.749µs
+[2025-10-31 10:20:44:440] INFO write_new_confirmed_inner: computed commitments block_n=1089730 ms=8
+[2025-10-31 10:20:44:585] INFO write_new_confirmed_inner: computed state root block_n=1089730 ms=145
+[2025-10-31 10:20:44:586] INFO write_new_confirmed_inner: computed block hash block_n=1089730 ms=0
+[2025-10-31 10:20:44:592] INFO ⛏️  Closed block #1089730 with 101 transactions - 192.793522ms
