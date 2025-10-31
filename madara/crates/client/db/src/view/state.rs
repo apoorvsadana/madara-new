@@ -192,11 +192,10 @@ impl<D: MadaraStorageRead> MadaraStateView<D> {
         let n_memory = results.iter().filter(|v| v.is_some()).count();
         let n_db = db_queries.len();
         tracing::info!(
-            op = "get_contract_storage_many_split",
-            total = queries.len(),
-            memory = n_memory,
-            db = n_db,
-            "batch split between memory and db"
+            "get_contract_storage_many_split: batch split between memory and db: total={} memory={} db={}",
+            queries.len(),
+            n_memory,
+            n_db
         );
 
         if !db_queries.is_empty() {
@@ -233,11 +232,10 @@ impl<D: MadaraStorageRead> MadaraStateView<D> {
         let n_memory = results.iter().filter(|v| v.is_some()).count();
         let n_db = db_addrs.len();
         tracing::info!(
-            op = "get_contract_nonce_many_split",
-            total = addresses.len(),
-            memory = n_memory,
-            db = n_db,
-            "batch split between memory and db"
+            "get_contract_nonce_many_split: batch split between memory and db: total={} memory={} db={}",
+            addresses.len(),
+            n_memory,
+            n_db
         );
 
         if !db_addrs.is_empty() {

@@ -383,6 +383,7 @@ impl ExecutorThread {
                                                 expected.push((*addr, *key, *value));
                                             }
                                         }
+                                        let start = Instant::now();
                                         let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
                                         for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
                                             if got.unwrap_or_default() != exp {
@@ -398,12 +399,19 @@ impl ExecutorThread {
                                                 );
                                             }
                                         }
+                                        let ms = (Instant::now() - start).as_millis();
+                                        tracing::info!(
+                                            "append_batch storage validation: queries={} ms={}",
+                                            flat_queries.len(),
+                                            ms
+                                        );
                                         Ok(())
                                     },
                                     || -> anyhow::Result<()> {
                                         // Flatten nonce queries
                                         let addrs: Vec<Felt> =
                                             append_batch_params.initial_nonces.keys().copied().collect();
+                                        let start = Instant::now();
                                         let expected: Vec<(Felt, Felt)> = addrs
                                             .iter()
                                             .map(|a| (*a, *append_batch_params.initial_nonces.get(a).expect("present")))
@@ -419,6 +427,12 @@ impl ExecutorThread {
                                                 tracing::debug!("Initial nonce matched for contract {:#x}", addr);
                                             }
                                         }
+                                        let ms = (Instant::now() - start).as_millis();
+                                        tracing::info!(
+                                            "append_batch nonce validation: queries={} ms={}",
+                                            addrs.len(),
+                                            ms
+                                        );
                                         Ok(())
                                     },
                                 );

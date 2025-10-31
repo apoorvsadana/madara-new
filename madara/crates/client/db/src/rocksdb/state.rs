@@ -153,10 +153,9 @@ impl RocksDBStorageInner {
                         chunk_results.push(result);
                     }
                     tracing::info!(
-                        op = "get_storage_at_many",
-                        items = chunk.len(),
-                        ms = start.elapsed().as_millis() as u64,
-                        "processed chunk"
+                        "get_storage_at_many: processed chunk items={} ms={}",
+                        chunk.len(),
+                        start.elapsed().as_millis() as u64
                     );
                     Ok::<Vec<Option<Felt>>, anyhow::Error>(chunk_results)
                 },
@@ -197,10 +196,9 @@ impl RocksDBStorageInner {
                         chunk_results.push(result);
                     }
                     tracing::info!(
-                        op = "get_contract_nonce_at_many",
-                        items = chunk.len(),
-                        ms = start.elapsed().as_millis() as u64,
-                        "processed chunk"
+                        "get_contract_nonce_at_many: processed chunk items={} ms={}",
+                        chunk.len(),
+                        start.elapsed().as_millis() as u64
                     );
                     Ok::<Vec<Option<Felt>>, anyhow::Error>(chunk_results)
                 },
