@@ -367,81 +367,99 @@ impl ExecutorThread {
                                 Default::default()
                             }
                             super::ExecutorCommand::AppendBatch(append_batch_params, callback) => {
+                                let executor_thread_start = Instant::now();
                                 // validate if initial reads by the batch are correct in parallel
                                 info!("Received append_batch command, validating initial reads");
                                 let preconfirmed_view = self.backend.view_on_latest();
 
                                 // Run storage and nonce validation in parallel using batch reads
-                                let (storage_result, nonce_result) = rayon::join(
-                                    || -> anyhow::Result<()> {
-                                        // Flatten storage queries
-                                        let mut flat_queries: Vec<(Felt, Felt)> = Vec::new();
-                                        let mut expected: Vec<(Felt, Felt, Felt)> = Vec::new();
-                                        for (addr, storage_map) in &append_batch_params.initial_storage {
-                                            for (key, value) in storage_map {
-                                                flat_queries.push((*addr, *key));
-                                                expected.push((*addr, *key, *value));
+                                let disable_storage_validations = std::env::var("MADARA_DISABLE_APPEND_VALIDATIONS")
+                                    .map(|v| v == "true")
+                                    .unwrap_or(false);
+                                info!("This is the env {:?}", std::env::var("MADARA_DISABLE_APPEND_VALIDATIONS"));
+
+                                let validation_start = Instant::now();
+                                if !disable_storage_validations {
+                                    let (storage_result, nonce_result) = rayon::join(
+                                        || -> anyhow::Result<()> {
+                                            // Flatten storage queries
+                                            let mut flat_queries: Vec<(Felt, Felt)> = Vec::new();
+                                            let mut expected: Vec<(Felt, Felt, Felt)> = Vec::new();
+                                            for (addr, storage_map) in &append_batch_params.initial_storage {
+                                                for (key, value) in storage_map {
+                                                    flat_queries.push((*addr, *key));
+                                                    expected.push((*addr, *key, *value));
+                                                }
                                             }
-                                        }
-                                        let start = Instant::now();
-                                        let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
-                                        for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
-                                            if got.unwrap_or_default() != exp {
-                                                anyhow::bail!(
-                                                    "Initial storage value mismatch for contract {addr:#x} key {key:#x}: expected {exp:#x} but got {:?}",
-                                                    got
-                                                );
-                                            } else {
-                                                tracing::debug!(
-                                                    "Initial storage value matched for contract {:#x} key {:#x}",
-                                                    addr,
-                                                    key
-                                                );
+                                            let start = Instant::now();
+                                            let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
+                                            for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter())
+                                            {
+                                                if got.unwrap_or_default() != exp {
+                                                    anyhow::bail!(
+                                                        "Initial storage value mismatch for contract {addr:#x} key {key:#x}: expected {exp:#x} but got {:?}",
+                                                        got
+                                                    );
+                                                } else {
+                                                    tracing::debug!(
+                                                        "Initial storage value matched for contract {:#x} key {:#x}",
+                                                        addr,
+                                                        key
+                                                    );
+                                                }
                                             }
-                                        }
-                                        let ms = (Instant::now() - start).as_millis();
-                                        tracing::info!(
-                                            "append_batch storage validation: queries={} ms={}",
-                                            flat_queries.len(),
-                                            ms
-                                        );
-                                        Ok(())
-                                    },
-                                    || -> anyhow::Result<()> {
-                                        // Flatten nonce queries
-                                        let addrs: Vec<Felt> =
-                                            append_batch_params.initial_nonces.keys().copied().collect();
-                                        let start = Instant::now();
-                                        let expected: Vec<(Felt, Felt)> = addrs
-                                            .iter()
-                                            .map(|a| (*a, *append_batch_params.initial_nonces.get(a).expect("present")))
-                                            .collect();
-                                        let fetched = preconfirmed_view.get_contract_nonce_many(&addrs)?;
-                                        for ((addr, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
-                                            if got.unwrap_or_default() != exp {
-                                                anyhow::bail!(
-                                                    "Initial nonce mismatch for contract {addr:#x}: expected {exp:#x} but got {:?}",
-                                                    got
-                                                );
-                                            } else {
-                                                tracing::debug!("Initial nonce matched for contract {:#x}", addr);
+                                            let ms = (Instant::now() - start).as_millis();
+                                            tracing::info!(
+                                                "append_batch storage validation: queries={} ms={}",
+                                                flat_queries.len(),
+                                                ms
+                                            );
+                                            Ok(())
+                                        },
+                                        || -> anyhow::Result<()> {
+                                            // Flatten nonce queries
+                                            let addrs: Vec<Felt> =
+                                                append_batch_params.initial_nonces.keys().copied().collect();
+                                            let start = Instant::now();
+                                            let expected: Vec<(Felt, Felt)> = addrs
+                                                .iter()
+                                                .map(|a| {
+                                                    (*a, *append_batch_params.initial_nonces.get(a).expect("present"))
+                                                })
+                                                .collect();
+                                            let fetched = preconfirmed_view.get_contract_nonce_many(&addrs)?;
+                                            for ((addr, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
+                                                if got.unwrap_or_default() != exp {
+                                                    anyhow::bail!(
+                                                        "Initial nonce mismatch for contract {addr:#x}: expected {exp:#x} but got {:?}",
+                                                        got
+                                                    );
+                                                } else {
+                                                    tracing::debug!("Initial nonce matched for contract {:#x}", addr);
+                                                }
                                             }
-                                        }
-                                        let ms = (Instant::now() - start).as_millis();
-                                        tracing::info!(
-                                            "append_batch nonce validation: queries={} ms={}",
-                                            addrs.len(),
-                                            ms
-                                        );
-                                        Ok(())
-                                    },
+                                            let ms = (Instant::now() - start).as_millis();
+                                            tracing::info!(
+                                                "append_batch nonce validation: queries={} ms={}",
+                                                addrs.len(),
+                                                ms
+                                            );
+                                            Ok(())
+                                        },
+                                    );
+
+                                    // Handle both results
+                                    storage_result?;
+                                    nonce_result?;
+
+                                    info!("Initial reads validated, proceeding to append batch");
+                                } else {
+                                    info!("⚠️ Disable append validations env detected, skipping initial reads validation!");
+                                }
+                                info!(
+                                    "Validation phase took {:.3}ms",
+                                    validation_start.elapsed().as_secs_f64() * 1000.0
                                 );
-
-                                // Handle both results
-                                storage_result?;
-                                nonce_result?;
-
-                                info!("Initial reads validated, proceeding to append batch");
 
                                 // If we're in executing state, close the current block
                                 if let ExecutorThreadState::Executing(ref mut execution_state) = state {
@@ -491,7 +509,15 @@ impl ExecutorThread {
                                     strk_l2_gas_price: append_batch_params.gas_prices.strk_l2_gas_price,
                                 });
 
+                                info!(
+                                    "Executor thread append_batch processing took {:.3}ms (before callback)",
+                                    executor_thread_start.elapsed().as_secs_f64() * 1000.0
+                                );
                                 let _ = callback.send(Ok(()));
+                                info!(
+                                    "Executor thread append_batch total took {:.3}ms (after callback)",
+                                    executor_thread_start.elapsed().as_secs_f64() * 1000.0
+                                );
                                 Default::default()
                             }
                         }

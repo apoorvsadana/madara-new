@@ -8,6 +8,7 @@ use mp_rpc::v0_9_0::{
     ClassAndTxnHash, ContractAndTxnHash,
 };
 use mp_utils::append_batch::AppendBatchParams;
+use tracing::info;
 
 #[async_trait]
 impl MadaraWriteRpcApiV0_1_0Server for Starknet {
@@ -85,13 +86,27 @@ impl MadaraWriteRpcApiV0_1_0Server for Starknet {
     }
 
     async fn append_batch(&self, append_batch: AppendBatchParams) -> RpcResult<()> {
-        Ok(self
+        let handler_start = std::time::Instant::now();
+        info!(
+            "Received the append batch RPC call with {} transactions, {} tx_results, {} initial_storage entries, {} current_storage entries",
+            append_batch.transactions.len(),
+            append_batch.transaction_results.len(),
+            append_batch.initial_storage.len(),
+            append_batch.current_storage.len()
+        );
+
+        let result = self
             .block_prod_handle
             .as_ref()
             .ok_or(StarknetRpcApiError::UnimplementedMethod)?
             .append_batch(append_batch)
             .await
             .context("Appending batch")
-            .map_err(StarknetRpcApiError::from)?)
+            .map_err(StarknetRpcApiError::from);
+
+        let handler_duration = handler_start.elapsed();
+        info!("append_batch handler completed in {:.3}ms", handler_duration.as_secs_f64() * 1000.0);
+
+        Ok(result?)
     }
 }

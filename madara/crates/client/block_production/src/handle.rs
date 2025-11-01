@@ -80,15 +80,25 @@ impl BlockProductionHandle {
 
     /// Append a batch executed outside of Madara (assuming third party is trusted)
     pub async fn append_batch(&self, append_batch: AppendBatchParams) -> Result<(), ExecutorCommandError> {
+        let start = std::time::Instant::now();
         let (sender, recv) = oneshot::channel();
+
+        let send_start = std::time::Instant::now();
         self.executor_commands.send(ExecutorCommand::AppendBatch(append_batch, sender)).map_err(|e| {
             tracing::error!("Error sending append batch command: {:?}", e);
             ExecutorCommandError::ChannelClosed
         })?;
-        recv.await.map_err(|e| {
+        tracing::info!("Channel send took {:.3}ms", send_start.elapsed().as_secs_f64() * 1000.0);
+
+        let recv_start = std::time::Instant::now();
+        let result = recv.await.map_err(|e| {
             tracing::error!("Error receiving append batch result: {:?}", e);
             ExecutorCommandError::ChannelClosed
-        })?
+        })?;
+        tracing::info!("Channel recv took {:.3}ms", recv_start.elapsed().as_secs_f64() * 1000.0);
+        tracing::info!("Total handle.append_batch took {:.3}ms", start.elapsed().as_secs_f64() * 1000.0);
+
+        result
     }
 
     /// Send a transaction through the bypass channel to bypass mempool and validation.

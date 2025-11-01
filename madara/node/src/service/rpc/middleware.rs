@@ -56,6 +56,7 @@ where
 
         async move {
             let now = std::time::Instant::now();
+            let method = req.method_name();
 
             tracing::trace!(
                 target: "rpc_raw_request",
@@ -64,9 +65,25 @@ where
             );
 
             metrics.on_call(&req);
-            let rp = inner.call(req.clone()).await;
 
-            let method = req.method_name();
+            // Log raw params size for append_batch to understand deserialization cost
+            if method == "madara_V0_1_0_appendBatch" {
+                if let Some(params_str) = req.params().as_str() {
+                    tracing::info!("RPC middleware: appendBatch params size = {} bytes", params_str.len());
+                }
+            }
+
+            let before_inner_call = std::time::Instant::now();
+            let rp = inner.call(req.clone()).await;
+            let inner_call_duration = before_inner_call.elapsed();
+
+            if method == "madara_V0_1_0_appendBatch" {
+                tracing::info!(
+                    "RPC middleware: inner.call (deser+handler+ser) took {:.3}ms",
+                    inner_call_duration.as_secs_f64() * 1000.0
+                );
+            }
+
             let status = rp.as_error_code().unwrap_or(200) as i64;
             let res_len = rp.as_result().len() as u64;
             let response_time = now.elapsed().as_micros();

@@ -278,13 +278,13 @@ impl BlockProductionTask {
                 self.send_state_notification(BlockProductionStateNotification::BatchExecuted);
             }
             ExecutorMessage::EndBlock(block_exec_summary) => {
-                tracing::debug!("Received ExecutorMessage::EndBlock");
+                tracing::info!("Received ExecutorMessage::EndBlock");
                 let current_state = self.current_state.take().context("No current state")?;
                 let TaskState::Executing(state) = current_state else {
                     anyhow::bail!("Invalid executor state transition: expected current state to be Executing")
                 };
 
-                tracing::debug!("Close and save block block_n={}", state.block_number);
+                tracing::info!("Close and save block block_n={}", state.block_number);
                 let start_time = Instant::now();
 
                 let n_txs = self
@@ -295,23 +295,32 @@ impl BlockProductionTask {
 
                 let backend = self.backend.clone();
                 global_spawn_rayon_task(move || {
+                    let nonce_removal_start = Instant::now();
                     for l1_nonce in state.consumed_core_contract_nonces {
                         // This ensures we remove the nonces for rejected L1 to L2 message transactions. This avoids us from reprocessing them on restart.
                         backend
                             .remove_pending_message_to_l2(l1_nonce)
                             .context("Removing pending message to l2 from database")?;
                     }
+                    let nonce_removal_time = nonce_removal_start.elapsed();
+                    tracing::info!("Removed pending L1 nonces in {:?}", nonce_removal_time);
 
+                    let bouncer_weights_start = Instant::now();
                     backend
                         .write_access()
                         .write_bouncer_weights(state.block_number, &block_exec_summary.bouncer_weights)
                         .context("Saving Bouncer Weights for SNOS")?;
+                    let bouncer_weights_time = bouncer_weights_start.elapsed();
+                    tracing::info!("Wrote bouncer weights in {:?}", bouncer_weights_time);
 
+                    let close_block_start = Instant::now();
                     let state_diff: mp_state_update::StateDiff = block_exec_summary.state_diff.into();
                     backend
                         .write_access()
                         .close_preconfirmed(/* pre_v0_13_2_hash_override */ true, Some(state_diff))
                         .context("Closing block")?;
+                    let close_block_time = close_block_start.elapsed();
+                    tracing::info!("Closed preconfirmed block in {:?}", close_block_time);
                     anyhow::Ok(())
                 })
                 .await?;
