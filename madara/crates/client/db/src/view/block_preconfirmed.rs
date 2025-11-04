@@ -14,6 +14,7 @@ use mp_state_update::{
 };
 use mp_transactions::validated::ValidatedTransaction;
 use std::fmt;
+use tracing;
 
 /// Lock guard on the content of a preconfirmed block. Only the first `n_txs_visible` executed transactions
 /// are visible.
@@ -368,15 +369,34 @@ impl<D: MadaraStorageRead> MadaraPreconfirmedBlockView<D> {
     }
 
     /// Get the full block with all classes, and normalize state diffs.
-    pub fn get_full_block_with_classes(&self) -> Result<(FullBlockWithoutCommitments, Vec<ConvertedClass>)> {
+    pub fn get_full_block_with_classes(&self, with_state_diff: bool) -> Result<(FullBlockWithoutCommitments, Vec<ConvertedClass>)> {
+        let start = std::time::Instant::now();
+
         let header = self.block.header.clone();
+        tracing::info!("get_full_block_with_classes: header cloned in {:?}", start.elapsed());
 
         // We don't care about the candidate transactions.
+        let step_start = std::time::Instant::now();
         let mut executed_transactions: Vec<_> = self.borrow_content().executed_transactions().cloned().collect();
+        tracing::info!("get_full_block_with_classes: executed transactions collected in {:?}", step_start.elapsed());
 
-        let state_diff = self.get_normalized_state_diff().context("Creating normalized state diff")?;
+        let step_start = std::time::Instant::now();
+        let state_diff = if with_state_diff {
+            self.get_normalized_state_diff().context("Creating normalized state diff")?
+        } else {
+            StateDiff::default()
+        };
+        tracing::info!("get_full_block_with_classes: normalized state diff created in {:?}", step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         let classes: Vec<_> = executed_transactions.iter_mut().filter_map(|tx| tx.declared_class.take()).collect();
+        tracing::info!("get_full_block_with_classes: classes extracted in {:?}", step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         let transactions: Vec<_> = executed_transactions.into_iter().map(|tx| tx.transaction.clone()).collect();
+        tracing::info!("get_full_block_with_classes: transactions mapped in {:?}", step_start.elapsed());
+
+        let step_start = std::time::Instant::now();
         let events = transactions
             .iter()
             .flat_map(|tx| {
@@ -387,7 +407,9 @@ impl<D: MadaraStorageRead> MadaraPreconfirmedBlockView<D> {
                     .map(|event| EventWithTransactionHash { transaction_hash: *tx.receipt.transaction_hash(), event })
             })
             .collect();
+        tracing::info!("get_full_block_with_classes: events collected in {:?}", step_start.elapsed());
 
+        tracing::info!("get_full_block_with_classes: total time {:?}", start.elapsed());
         Ok((FullBlockWithoutCommitments { header, state_diff, transactions, events }, classes))
     }
 }

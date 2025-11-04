@@ -62,8 +62,8 @@ impl CurrentBlockState {
     pub async fn append_batch(&mut self, mut batch: BatchExecutionResult) -> anyhow::Result<()> {
         let mut executed = vec![];
 
-        for ((blockifier_exec_result, blockifier_tx), mut additional_info) in
-            batch.blockifier_results.into_iter().zip(batch.executed_txs.txs).zip(batch.executed_txs.additional_info)
+        for ((execution_result, blockifier_tx), mut additional_info) in
+            batch.execution_results.into_iter().zip(batch.executed_txs.txs).zip(batch.executed_txs.additional_info)
         {
             if let Some(core_contract_nonce) = blockifier_tx.l1_handler_tx_nonce() {
                 // Even when the l1 handler tx is reverted, we mark the nonce as consumed.
@@ -71,57 +71,85 @@ impl CurrentBlockState {
                     .insert(core_contract_nonce.to_felt().try_into().expect("Invalid nonce"));
             }
 
-            if let Ok((execution_info, state_diff)) = blockifier_exec_result {
-                let declared_class = additional_info.declared_class.take().filter(|_| !execution_info.is_reverted());
+            match execution_result {
+                executor::ExecutionResult::ExecutionInfo(blockifier_exec_result) => {
+                    // Standard execution path - convert execution info to receipt
+                    if let Ok((execution_info, state_diff)) = blockifier_exec_result {
+                        let declared_class =
+                            additional_info.declared_class.take().filter(|_| !execution_info.is_reverted());
 
-                let receipt = from_blockifier_execution_info(&execution_info, &blockifier_tx);
-                let converted_tx = TransactionWithHash::from(blockifier_tx.clone());
+                        let receipt = from_blockifier_execution_info(&execution_info, &blockifier_tx);
+                        let converted_tx = TransactionWithHash::from(blockifier_tx.clone());
 
-                executed.push(PreconfirmedExecutedTransaction {
-                    transaction: TransactionWithReceipt { transaction: converted_tx.transaction, receipt },
-                    state_diff: TransactionStateUpdate {
-                        nonces: state_diff
-                            .nonces
-                            .into_iter()
-                            .map(|(contract_addr, nonce)| (contract_addr.to_felt(), nonce.to_felt()))
-                            .collect(),
-                        contract_class_hashes: state_diff
-                            .class_hashes
-                            .into_iter()
-                            .map(|(contract_addr, class_hash)| {
-                                let entry = if !self.deployed_contracts.contains(&contract_addr)
-                                    && !self.backend.view_on_latest_confirmed().is_contract_deployed(&contract_addr)?
-                                {
-                                    self.deployed_contracts.insert(contract_addr.to_felt());
-                                    ClassUpdateItem::DeployedContract(class_hash.to_felt())
-                                } else {
-                                    ClassUpdateItem::ReplacedClass(class_hash.to_felt())
-                                };
+                        executed.push(PreconfirmedExecutedTransaction {
+                            transaction: TransactionWithReceipt { transaction: converted_tx.transaction, receipt },
+                            state_diff: TransactionStateUpdate {
+                                nonces: state_diff
+                                    .nonces
+                                    .into_iter()
+                                    .map(|(contract_addr, nonce)| (contract_addr.to_felt(), nonce.to_felt()))
+                                    .collect(),
+                                contract_class_hashes: state_diff
+                                    .class_hashes
+                                    .into_iter()
+                                    .map(|(contract_addr, class_hash)| {
+                                        let entry = if !self.deployed_contracts.contains(&contract_addr)
+                                            && !self
+                                                .backend
+                                                .view_on_latest_confirmed()
+                                                .is_contract_deployed(&contract_addr)?
+                                        {
+                                            self.deployed_contracts.insert(contract_addr.to_felt());
+                                            ClassUpdateItem::DeployedContract(class_hash.to_felt())
+                                        } else {
+                                            ClassUpdateItem::ReplacedClass(class_hash.to_felt())
+                                        };
 
-                                Ok((contract_addr.to_felt(), entry))
-                            })
-                            .collect::<anyhow::Result<_>>()?,
-                        storage_diffs: state_diff
-                            .storage
-                            .into_iter()
-                            .map(|((contract_addr, key), value)| ((contract_addr.to_felt(), key.to_felt()), value))
-                            .collect(),
-                        declared_classes: declared_class
-                            .iter()
-                            .map(|class| {
-                                (
-                                    *class.class_hash(),
-                                    class
-                                        .as_sierra()
-                                        .map(|class| DeclaredClassCompiledClass::Sierra(class.info.compiled_class_hash))
-                                        .unwrap_or(DeclaredClassCompiledClass::Legacy),
-                                )
-                            })
-                            .collect(),
-                    },
-                    declared_class,
-                    arrived_at: additional_info.arrived_at,
-                })
+                                        Ok((contract_addr.to_felt(), entry))
+                                    })
+                                    .collect::<anyhow::Result<_>>()?,
+                                storage_diffs: state_diff
+                                    .storage
+                                    .into_iter()
+                                    .map(|((contract_addr, key), value)| {
+                                        ((contract_addr.to_felt(), key.to_felt()), value)
+                                    })
+                                    .collect(),
+                                declared_classes: declared_class
+                                    .iter()
+                                    .map(|class| {
+                                        (
+                                            *class.class_hash(),
+                                            class
+                                                .as_sierra()
+                                                .map(|class| {
+                                                    DeclaredClassCompiledClass::Sierra(class.info.compiled_class_hash)
+                                                })
+                                                .unwrap_or(DeclaredClassCompiledClass::Legacy),
+                                        )
+                                    })
+                                    .collect(),
+                            },
+                            declared_class,
+                            arrived_at: additional_info.arrived_at,
+                        })
+                    }
+                }
+                executor::ExecutionResult::Receipt { receipt, state_diff } => {
+                    // append_batch path - receipt and state_diff are already computed, just use them directly
+                    let converted_tx = TransactionWithHash::from(blockifier_tx.clone());
+                    let declared_class = additional_info.declared_class.take().filter(|_| {
+                        !matches!(receipt.execution_result(), mp_receipt::ExecutionResult::Reverted { .. })
+                    });
+
+                    // Use the state_diff that came with the receipt
+                    executed.push(PreconfirmedExecutedTransaction {
+                        transaction: TransactionWithReceipt { transaction: converted_tx.transaction, receipt },
+                        state_diff,
+                        declared_class,
+                        arrived_at: additional_info.arrived_at,
+                    })
+                }
             }
         }
 
@@ -278,13 +306,13 @@ impl BlockProductionTask {
                 self.send_state_notification(BlockProductionStateNotification::BatchExecuted);
             }
             ExecutorMessage::EndBlock(block_exec_summary) => {
-                tracing::debug!("Received ExecutorMessage::EndBlock");
+                tracing::info!("Received ExecutorMessage::EndBlock");
                 let current_state = self.current_state.take().context("No current state")?;
                 let TaskState::Executing(state) = current_state else {
                     anyhow::bail!("Invalid executor state transition: expected current state to be Executing")
                 };
 
-                tracing::debug!("Close and save block block_n={}", state.block_number);
+                tracing::info!("Close and save block block_n={}", state.block_number);
                 let start_time = Instant::now();
 
                 let n_txs = self
@@ -295,23 +323,32 @@ impl BlockProductionTask {
 
                 let backend = self.backend.clone();
                 global_spawn_rayon_task(move || {
+                    let nonce_removal_start = Instant::now();
                     for l1_nonce in state.consumed_core_contract_nonces {
                         // This ensures we remove the nonces for rejected L1 to L2 message transactions. This avoids us from reprocessing them on restart.
                         backend
                             .remove_pending_message_to_l2(l1_nonce)
                             .context("Removing pending message to l2 from database")?;
                     }
+                    let nonce_removal_time = nonce_removal_start.elapsed();
+                    tracing::info!("Removed pending L1 nonces in {:?}", nonce_removal_time);
 
+                    let bouncer_weights_start = Instant::now();
                     backend
                         .write_access()
                         .write_bouncer_weights(state.block_number, &block_exec_summary.bouncer_weights)
                         .context("Saving Bouncer Weights for SNOS")?;
+                    let bouncer_weights_time = bouncer_weights_start.elapsed();
+                    tracing::info!("Wrote bouncer weights in {:?}", bouncer_weights_time);
 
+                    let close_block_start = Instant::now();
                     let state_diff: mp_state_update::StateDiff = block_exec_summary.state_diff.into();
                     backend
                         .write_access()
                         .close_preconfirmed(/* pre_v0_13_2_hash_override */ true, Some(state_diff))
                         .context("Closing block")?;
+                    let close_block_time = close_block_start.elapsed();
+                    tracing::info!("Closed preconfirmed block in {:?}", close_block_time);
                     anyhow::Ok(())
                 })
                 .await?;
@@ -492,6 +529,7 @@ pub(crate) mod tests {
                 bouncer_config: BouncerConfig {
                     block_max_capacity: bouncer_weights,
                     builtin_weights: Default::default(),
+                    blake_weight: Default::default(),
                 },
                 ..ChainConfig::madara_devnet()
             })

@@ -14,7 +14,7 @@ pub struct CommitmentComputationContext {
     pub chain_id: Felt,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct TransactionAndReceiptCommitment {
     pub transaction_commitment: Felt,
     pub receipt_commitment: Felt,
@@ -51,7 +51,7 @@ impl TransactionAndReceiptCommitment {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct StateDiffCommitment {
     pub state_diff_commitment: Felt,
     pub state_diff_length: u64,
@@ -63,7 +63,7 @@ impl StateDiffCommitment {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct EventsCommitment {
     pub events_commitment: Felt,
     pub events_count: u64,
@@ -83,7 +83,7 @@ impl EventsCommitment {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct BlockCommitments {
     pub transaction: TransactionAndReceiptCommitment,
     pub state_diff: StateDiffCommitment,

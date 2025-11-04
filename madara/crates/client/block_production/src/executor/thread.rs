@@ -4,18 +4,16 @@ use crate::util::{create_execution_context, AdditionalTxInfo, BatchToExecute, Bl
 use anyhow::Context;
 use blockifier::{
     blockifier::transaction_executor::TransactionExecutor,
-    state::{
-        cached_state::{CommitmentStateDiff, StateMaps},
-        state_api::State,
-    },
-    transaction::{account_transaction::ExecutionFlags, objects::TransactionExecutionInfo},
+    state::{cached_state::CommitmentStateDiff, state_api::State},
+    transaction::account_transaction::ExecutionFlags,
 };
 use futures::future::OptionFuture;
 use mc_db::MadaraBackend;
 use mc_exec::{execution::TxInfo, LayeredStateAdapter, MadaraBackendExecutionExt};
 use mp_block::header::GasPrices;
 use mp_convert::{Felt, ToFelt};
-use rayon::prelude::*;
+use mp_receipt::TransactionReceipt;
+use mp_utils::append_batch;
 use starknet_api::{contract_class::ContractClass, core::ContractAddress, hash::StarkHash, state::StorageKey};
 use starknet_api::{
     core::{ClassHash, Nonce},
@@ -63,7 +61,7 @@ enum ExecutorThreadState {
 
 struct AppendBatchState {
     pub transactions: Vec<AccountTransaction>,
-    pub transaction_results: Vec<(TransactionExecutionInfo, CommitmentStateDiff)>,
+    pub transaction_results: Vec<(append_batch::TransactionReceipt, CommitmentStateDiff)>,
 }
 
 struct ExecutorInitialCache {
@@ -367,81 +365,99 @@ impl ExecutorThread {
                                 Default::default()
                             }
                             super::ExecutorCommand::AppendBatch(append_batch_params, callback) => {
+                                let executor_thread_start = Instant::now();
                                 // validate if initial reads by the batch are correct in parallel
                                 info!("Received append_batch command, validating initial reads");
                                 let preconfirmed_view = self.backend.view_on_latest();
 
                                 // Run storage and nonce validation in parallel using batch reads
-                                let (storage_result, nonce_result) = rayon::join(
-                                    || -> anyhow::Result<()> {
-                                        // Flatten storage queries
-                                        let mut flat_queries: Vec<(Felt, Felt)> = Vec::new();
-                                        let mut expected: Vec<(Felt, Felt, Felt)> = Vec::new();
-                                        for (addr, storage_map) in &append_batch_params.initial_storage {
-                                            for (key, value) in storage_map {
-                                                flat_queries.push((*addr, *key));
-                                                expected.push((*addr, *key, *value));
+                                let disable_storage_validations = std::env::var("MADARA_DISABLE_APPEND_VALIDATIONS")
+                                    .map(|v| v == "true")
+                                    .unwrap_or(false);
+                                info!("This is the env {:?}", std::env::var("MADARA_DISABLE_APPEND_VALIDATIONS"));
+
+                                let validation_start = Instant::now();
+                                if !disable_storage_validations {
+                                    let (storage_result, nonce_result) = rayon::join(
+                                        || -> anyhow::Result<()> {
+                                            // Flatten storage queries
+                                            let mut flat_queries: Vec<(Felt, Felt)> = Vec::new();
+                                            let mut expected: Vec<(Felt, Felt, Felt)> = Vec::new();
+                                            for (addr, storage_map) in &append_batch_params.initial_storage {
+                                                for (key, value) in storage_map {
+                                                    flat_queries.push((*addr, *key));
+                                                    expected.push((*addr, *key, *value));
+                                                }
                                             }
-                                        }
-                                        let start = Instant::now();
-                                        let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
-                                        for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
-                                            if got.unwrap_or_default() != exp {
-                                                anyhow::bail!(
-                                                    "Initial storage value mismatch for contract {addr:#x} key {key:#x}: expected {exp:#x} but got {:?}",
-                                                    got
-                                                );
-                                            } else {
-                                                tracing::debug!(
-                                                    "Initial storage value matched for contract {:#x} key {:#x}",
-                                                    addr,
-                                                    key
-                                                );
+                                            let start = Instant::now();
+                                            let fetched = preconfirmed_view.get_contract_storage_many(&flat_queries)?;
+                                            for ((addr, key, exp), got) in expected.into_iter().zip(fetched.into_iter())
+                                            {
+                                                if got.unwrap_or_default() != exp {
+                                                    anyhow::bail!(
+                                                        "Initial storage value mismatch for contract {addr:#x} key {key:#x}: expected {exp:#x} but got {:?}",
+                                                        got
+                                                    );
+                                                } else {
+                                                    tracing::debug!(
+                                                        "Initial storage value matched for contract {:#x} key {:#x}",
+                                                        addr,
+                                                        key
+                                                    );
+                                                }
                                             }
-                                        }
-                                        let ms = (Instant::now() - start).as_millis();
-                                        tracing::info!(
-                                            "append_batch storage validation: queries={} ms={}",
-                                            flat_queries.len(),
-                                            ms
-                                        );
-                                        Ok(())
-                                    },
-                                    || -> anyhow::Result<()> {
-                                        // Flatten nonce queries
-                                        let addrs: Vec<Felt> =
-                                            append_batch_params.initial_nonces.keys().copied().collect();
-                                        let start = Instant::now();
-                                        let expected: Vec<(Felt, Felt)> = addrs
-                                            .iter()
-                                            .map(|a| (*a, *append_batch_params.initial_nonces.get(a).expect("present")))
-                                            .collect();
-                                        let fetched = preconfirmed_view.get_contract_nonce_many(&addrs)?;
-                                        for ((addr, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
-                                            if got.unwrap_or_default() != exp {
-                                                anyhow::bail!(
-                                                    "Initial nonce mismatch for contract {addr:#x}: expected {exp:#x} but got {:?}",
-                                                    got
-                                                );
-                                            } else {
-                                                tracing::debug!("Initial nonce matched for contract {:#x}", addr);
+                                            let ms = (Instant::now() - start).as_millis();
+                                            tracing::info!(
+                                                "append_batch storage validation: queries={} ms={}",
+                                                flat_queries.len(),
+                                                ms
+                                            );
+                                            Ok(())
+                                        },
+                                        || -> anyhow::Result<()> {
+                                            // Flatten nonce queries
+                                            let addrs: Vec<Felt> =
+                                                append_batch_params.initial_nonces.keys().copied().collect();
+                                            let start = Instant::now();
+                                            let expected: Vec<(Felt, Felt)> = addrs
+                                                .iter()
+                                                .map(|a| {
+                                                    (*a, *append_batch_params.initial_nonces.get(a).expect("present"))
+                                                })
+                                                .collect();
+                                            let fetched = preconfirmed_view.get_contract_nonce_many(&addrs)?;
+                                            for ((addr, exp), got) in expected.into_iter().zip(fetched.into_iter()) {
+                                                if got.unwrap_or_default() != exp {
+                                                    anyhow::bail!(
+                                                        "Initial nonce mismatch for contract {addr:#x}: expected {exp:#x} but got {:?}",
+                                                        got
+                                                    );
+                                                } else {
+                                                    tracing::debug!("Initial nonce matched for contract {:#x}", addr);
+                                                }
                                             }
-                                        }
-                                        let ms = (Instant::now() - start).as_millis();
-                                        tracing::info!(
-                                            "append_batch nonce validation: queries={} ms={}",
-                                            addrs.len(),
-                                            ms
-                                        );
-                                        Ok(())
-                                    },
+                                            let ms = (Instant::now() - start).as_millis();
+                                            tracing::info!(
+                                                "append_batch nonce validation: queries={} ms={}",
+                                                addrs.len(),
+                                                ms
+                                            );
+                                            Ok(())
+                                        },
+                                    );
+
+                                    // Handle both results
+                                    storage_result?;
+                                    nonce_result?;
+
+                                    info!("Initial reads validated, proceeding to append batch");
+                                } else {
+                                    info!("⚠️ Disable append validations env detected, skipping initial reads validation!");
+                                }
+                                info!(
+                                    "Validation phase took {:.3}ms",
+                                    validation_start.elapsed().as_secs_f64() * 1000.0
                                 );
-
-                                // Handle both results
-                                storage_result?;
-                                nonce_result?;
-
-                                info!("Initial reads validated, proceeding to append batch");
 
                                 // If we're in executing state, close the current block
                                 if let ExecutorThreadState::Executing(ref mut execution_state) = state {
@@ -491,7 +507,15 @@ impl ExecutorThread {
                                     strk_l2_gas_price: append_batch_params.gas_prices.strk_l2_gas_price,
                                 });
 
+                                info!(
+                                    "Executor thread append_batch processing took {:.3}ms (before callback)",
+                                    executor_thread_start.elapsed().as_secs_f64() * 1000.0
+                                );
                                 let _ = callback.send(Ok(()));
+                                info!(
+                                    "Executor thread append_batch total took {:.3}ms (after callback)",
+                                    executor_thread_start.elapsed().as_secs_f64() * 1000.0
+                                );
                                 Default::default()
                             }
                         }
@@ -562,38 +586,21 @@ impl ExecutorThread {
 
             let exec_start_time = Instant::now();
 
-            let (blockifier_results, block_full, executed_txs) = if append_batch_state.is_some() {
+            let (execution_results, block_full, executed_txs) = if append_batch_state.is_some() {
                 let append_batch_state = append_batch_state.take().unwrap();
                 info!("Starting append batch execution with {} transactions", append_batch_state.transactions.len());
-                let blockifier_results = append_batch_state
-                    .transaction_results
-                    .into_par_iter()
-                    .map(|(info, state_diff)| {
-                        let state_maps = StateMaps {
-                            nonces: state_diff.address_to_nonce.into_iter().collect(),
-                            class_hashes: state_diff.address_to_class_hash.into_iter().collect(),
-                            storage: state_diff
-                                .storage_updates
-                                .into_iter()
-                                .flat_map(|(addr, storage_map)| {
-                                    storage_map.into_iter().map(move |(key, value)| ((addr, key), value))
-                                })
-                                .collect(),
-                            compiled_class_hashes: state_diff.class_hash_to_compiled_class_hash.into_iter().collect(),
-                            declared_contracts: HashMap::new(), // Assuming we don't have this for now
-                        };
-                        Ok((info, state_maps))
-                    })
-                    .collect::<Vec<_>>();
-
-                // we don't want to mix batch txs with other txs
-                let block_full = true;
 
                 let mut batch_to_execute = BatchToExecute::default();
-                append_batch_state.transactions.into_iter().for_each(|tx| {
+                let mut execution_results = Vec::new();
+
+                // Process each transaction with its result
+                for (tx, (receipt_from_append_batch, blockifier_state_diff)) in
+                    append_batch_state.transactions.into_iter().zip(append_batch_state.transaction_results)
+                {
+                    // Convert blockifier tx for tracking
                     let blockifier_tx = blockifier::transaction::transaction_execution::Transaction::Account(
                         blockifier::transaction::account_transaction::AccountTransaction {
-                            tx,
+                            tx: tx.clone(),
                             execution_flags: ExecutionFlags {
                                 only_query: false,
                                 charge_fee: true,
@@ -601,11 +608,62 @@ impl ExecutorThread {
                                 strict_nonce_check: true,
                             },
                         },
-                    ); // Assuming From trait is implemented
-                    let additional_info = AdditionalTxInfo::default(); // We can add declared class if needed
+                    );
+
+                    // Convert the append_batch TransactionReceipt to mp_receipt::TransactionReceipt
+                    // Both types are structurally identical, just different modules
+                    let receipt: TransactionReceipt = convert_append_batch_receipt(receipt_from_append_batch);
+
+                    // Convert blockifier state diff to TransactionStateUpdate
+                    let state_diff = mp_state_update::TransactionStateUpdate {
+                        nonces: blockifier_state_diff
+                            .address_to_nonce
+                            .into_iter()
+                            .map(|(addr, nonce)| (addr.to_felt(), nonce.to_felt()))
+                            .collect(),
+                        contract_class_hashes: blockifier_state_diff
+                            .address_to_class_hash
+                            .into_iter()
+                            .map(|(addr, class_hash)| {
+                                // For append_batch, we assume all are deployed contracts
+                                // TODO: Improve this logic if needed
+                                (
+                                    addr.to_felt(),
+                                    mp_state_update::ClassUpdateItem::DeployedContract(class_hash.to_felt()),
+                                )
+                            })
+                            .collect(),
+                        storage_diffs: blockifier_state_diff
+                            .storage_updates
+                            .into_iter()
+                            .flat_map(|(addr, storage_map)| {
+                                storage_map
+                                    .into_iter()
+                                    .map(move |(key, value)| ((addr.to_felt(), key.to_felt()), value))
+                            })
+                            .collect(),
+                        declared_classes: blockifier_state_diff
+                            .class_hash_to_compiled_class_hash
+                            .into_iter()
+                            .map(|(class_hash, compiled_hash)| {
+                                (
+                                    class_hash.to_felt(),
+                                    mp_state_update::DeclaredClassCompiledClass::Sierra(compiled_hash.to_felt()),
+                                )
+                            })
+                            .collect(),
+                    };
+
+                    // Store the blockifier tx and receipt with state diff
+                    let additional_info = AdditionalTxInfo::default();
                     batch_to_execute.push(blockifier_tx, additional_info);
-                });
-                (blockifier_results, block_full, batch_to_execute)
+                    execution_results.push(super::ExecutionResult::Receipt { receipt, state_diff });
+                }
+
+                // we don't want to mix batch txs with other txs
+                let block_full = true;
+
+                (execution_results, block_full, batch_to_execute)
             } else {
                 info!("Executing transactions without append batch");
                 // TODO: we should use the execution deadline option
@@ -617,7 +675,12 @@ impl ExecutorThread {
 
                 // Remove the used txs.
                 let executed_txs = to_exec.remove_n_front(blockifier_results.len());
-                (blockifier_results, block_full, executed_txs)
+
+                // Wrap results in ExecutionResult::ExecutionInfo
+                let execution_results =
+                    blockifier_results.into_iter().map(super::ExecutionResult::ExecutionInfo).collect();
+
+                (execution_results, block_full, executed_txs)
             };
             let exec_duration = exec_start_time.elapsed();
 
@@ -628,32 +691,51 @@ impl ExecutorThread {
 
             // Doesn't process the results, it just inspects them for logging stats, and figures out which classes were declared.
             // Results are processed async, outside of the executor.
-            for (btx, res) in executed_txs.txs.iter().zip(blockifier_results.iter()) {
+            for (btx, res) in executed_txs.txs.iter().zip(execution_results.iter()) {
                 match res {
-                    Ok((execution_info, _state_diff)) => {
-                        tracing::trace!("Successful execution of transaction {:#x}", btx.tx_hash().to_felt());
+                    super::ExecutionResult::ExecutionInfo(exec_result) => {
+                        match exec_result {
+                            Ok((execution_info, _state_diff)) => {
+                                tracing::trace!("Successful execution of transaction {:#x}", btx.tx_hash().to_felt());
+
+                                stats.n_added_to_block += 1;
+                                stats.l2_gas_consumed += u128::from(execution_info.receipt.gas.l2_gas.0);
+                                block_empty = false;
+                                if execution_info.is_reverted() {
+                                    stats.n_reverted += 1;
+                                } else if let Some((class_hash, contract_class)) = btx.declared_contract_class() {
+                                    tracing::debug!("Declared class_hash={:#x}", class_hash.to_felt());
+                                    stats.declared_classes += 1;
+                                    execution_state.declared_classes.insert(class_hash, contract_class);
+                                }
+                            }
+                            Err(err) => {
+                                // These are the transactions that have errored but we can't revert them. It can be because of an internal server error, but
+                                // errors during the execution of Declare and DeployAccount also appear here as they cannot be reverted.
+                                // We reject them.
+                                // Note that this is a big DoS vector.
+                                tracing::error!(
+                                    "Rejected transaction {:#x} for unexpected error: {err:#}",
+                                    btx.tx_hash().to_felt()
+                                );
+                                stats.n_rejected += 1;
+                            }
+                        }
+                    }
+                    super::ExecutionResult::Receipt { receipt, .. } => {
+                        // For pre-computed receipts from append_batch
+                        tracing::trace!("Pre-computed receipt for transaction {:#x}", btx.tx_hash().to_felt());
 
                         stats.n_added_to_block += 1;
-                        stats.l2_gas_consumed += u128::from(execution_info.receipt.gas.l2_gas.0);
+                        // Extract gas from receipt - TODO: implement proper gas extraction from receipt
                         block_empty = false;
-                        if execution_info.is_reverted() {
+                        if matches!(receipt.execution_result(), mp_receipt::ExecutionResult::Reverted { .. }) {
                             stats.n_reverted += 1;
                         } else if let Some((class_hash, contract_class)) = btx.declared_contract_class() {
                             tracing::debug!("Declared class_hash={:#x}", class_hash.to_felt());
                             stats.declared_classes += 1;
                             execution_state.declared_classes.insert(class_hash, contract_class);
                         }
-                    }
-                    Err(err) => {
-                        // These are the transactions that have errored but we can't revert them. It can be because of an internal server error, but
-                        // errors during the execution of Declare and DeployAccount also appear here as they cannot be reverted.
-                        // We reject them.
-                        // Note that this is a big DoS vector.
-                        tracing::error!(
-                            "Rejected transaction {:#x} for unexpected error: {err:#}",
-                            btx.tx_hash().to_felt()
-                        );
-                        stats.n_rejected += 1;
                     }
                 }
             }
@@ -675,7 +757,7 @@ impl ExecutorThread {
             );
             info!("Block status: full={}, empty={}, force_close={}", block_full, block_empty, force_close);
 
-            let exec_result = super::BatchExecutionResult { executed_txs, blockifier_results, stats };
+            let exec_result = super::BatchExecutionResult { executed_txs, execution_results, stats };
             if exec_result.stats.n_executed > 0
                 && self.replies_sender.blocking_send(super::ExecutorMessage::BatchExecuted(exec_result)).is_err()
             {
@@ -719,4 +801,13 @@ pub fn convert_felt_to_contract_address(felt: Felt) -> ContractAddress {
 
 pub fn convert_felt_to_storage_key(felt: Felt) -> StorageKey {
     StorageKey(felt.try_into().expect("Failed to convert storage key to Patricia Key"))
+}
+
+/// Convert append_batch TransactionReceipt to mp_receipt::TransactionReceipt
+/// Both types are structurally identical (except mp_receipt has L1Handler which won't appear in append_batch)
+/// We serialize and deserialize for a byte-by-byte conversion
+fn convert_append_batch_receipt(receipt: append_batch::TransactionReceipt) -> TransactionReceipt {
+    // Both types are structurally identical, so we can serialize and deserialize to convert
+    serde_json::from_value(serde_json::to_value(receipt).expect("Failed to serialize receipt"))
+        .expect("Failed to deserialize receipt")
 }

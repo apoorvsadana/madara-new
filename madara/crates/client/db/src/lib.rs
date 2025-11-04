@@ -452,21 +452,29 @@ impl<D: MadaraStorage> MadaraBackendWriter<D> {
         pre_v0_13_2_hash_override: bool,
         state_diff: Option<StateDiff>,
     ) -> Result<AddFullBlockResult> {
+        let start_get_block = Instant::now();
         let (mut block, classes) = self
             .inner
             .block_view_on_preconfirmed()
             .context("There is no current preconfirmed block")?
-            .get_full_block_with_classes()?;
+            .get_full_block_with_classes(state_diff.is_none())?;
+        tracing::info!("⏱️ Getting full block with classes took: {:?}", start_get_block.elapsed());
 
         if let Some(state_diff) = state_diff {
+            let start_state_diff = Instant::now();
             block.state_diff = state_diff;
+            tracing::info!("⏱️ Setting state diff took: {:?}", start_state_diff.elapsed());
         }
 
         // Write the block & apply to global trie
 
+        let start_write_confirmed = Instant::now();
         let result = self.write_new_confirmed_inner(&block, &classes, pre_v0_13_2_hash_override)?;
+        tracing::info!("⏱️ Writing new confirmed inner took: {:?}", start_write_confirmed.elapsed());
 
+        let start_new_confirmed = Instant::now();
         self.new_confirmed_block(block.header.block_number)?;
+        tracing::info!("⏱️ New confirmed block took: {:?}", start_new_confirmed.elapsed());
 
         Ok(result)
     }
@@ -512,31 +520,39 @@ impl<D: MadaraStorage> MadaraBackendWriter<D> {
         };
 
         let start_commitments = Instant::now();
-        let commitments = BlockCommitments::compute(
-            &CommitmentComputationContext {
-                protocol_version: self.inner.chain_config.latest_protocol_version,
-                chain_id: self.inner.chain_config.chain_id.to_felt(),
-            },
-            &block.transactions,
-            &block.state_diff,
-            &block.events,
-        );
-        let commitments_ms = start_commitments.elapsed().as_millis();
-        tracing::info!(
-            "write_new_confirmed_inner: computed commitments block_n={} ms={}",
-            block.header.block_number,
-            commitments_ms
-        );
+        let disable_trie_calculation =
+            std::env::var("MADARA_DISABLE_TRIE_CALCUTION").map(|v| v == "true").unwrap_or(false);
+        let (commitments, global_state_root) = if disable_trie_calculation {
+            tracing::info!("⚠️ Disable trie calculation env detected, skipping trie calculation!");
+            (BlockCommitments::default(), Felt::ZERO)
+        } else {
+            let commitments = BlockCommitments::compute(
+                &CommitmentComputationContext {
+                    protocol_version: self.inner.chain_config.latest_protocol_version,
+                    chain_id: self.inner.chain_config.chain_id.to_felt(),
+                },
+                &block.transactions,
+                &block.state_diff,
+                &block.events,
+            );
+            let commitments_ms = start_commitments.elapsed().as_millis();
+            tracing::info!(
+                "write_new_confirmed_inner: computed commitments block_n={} ms={}",
+                block.header.block_number,
+                commitments_ms
+            );
 
-        // Global state root and block hash.
-        let start_state_root = Instant::now();
-        let global_state_root = self.apply_to_global_trie(block.header.block_number, [&block.state_diff])?;
-        let state_root_ms = start_state_root.elapsed().as_millis();
-        tracing::info!(
-            "write_new_confirmed_inner: computed state root block_n={} ms={}",
-            block.header.block_number,
-            state_root_ms
-        );
+            // Global state root and block hash.
+            let start_state_root = Instant::now();
+            let global_state_root = self.apply_to_global_trie(block.header.block_number, [&block.state_diff])?;
+            let state_root_ms = start_state_root.elapsed().as_millis();
+            tracing::info!(
+                "write_new_confirmed_inner: computed state root block_n={} ms={}",
+                block.header.block_number,
+                state_root_ms
+            );
+            (commitments, global_state_root)
+        };
 
         let header =
             block.header.clone().into_confirmed_header(parent_block_hash, commitments.clone(), global_state_root);
