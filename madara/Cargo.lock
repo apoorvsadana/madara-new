@@ -7362,6 +7362,7 @@ dependencies = [
  "cairo-lang-utils 2.12.3",
  "cairo-native",
  "cairo-vm",
+ "dashmap",
  "flate2",
  "lazy_static",
  "mp-convert",
@@ -7375,6 +7376,7 @@ dependencies = [
  "starknet_api",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
