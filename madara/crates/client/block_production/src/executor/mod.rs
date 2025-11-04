@@ -4,6 +4,7 @@ use blockifier::blockifier::transaction_executor::{
     BlockExecutionSummary, TransactionExecutionOutput, TransactionExecutorResult,
 };
 use mc_db::MadaraBackend;
+use mp_receipt::TransactionReceipt;
 use mp_utils::append_batch::AppendBatchParams;
 use std::{any::Any, panic::AssertUnwindSafe, sync::Arc};
 use tokio::sync::{
@@ -13,6 +14,15 @@ use tokio::sync::{
 
 mod tests;
 mod thread;
+
+/// Execution result can be either from blockifier execution or pre-computed receipts
+#[derive(Debug)]
+pub enum ExecutionResult {
+    /// Standard execution with blockifier - returns execution info that needs to be converted to receipt
+    ExecutionInfo(TransactionExecutorResult<TransactionExecutionOutput>),
+    /// Pre-computed receipt from append_batch - already in final form with state diff
+    Receipt { receipt: TransactionReceipt, state_diff: mp_state_update::TransactionStateUpdate },
+}
 
 /// Handle to used to talk with the executor thread.
 pub struct ExecutorThreadHandle {
@@ -52,11 +62,17 @@ pub enum ExecutorMessage {
     EndBlock(BlockExecutionSummary),
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct BatchExecutionResult {
     pub executed_txs: BatchToExecute,
-    pub blockifier_results: Vec<TransactionExecutorResult<TransactionExecutionOutput>>,
+    pub execution_results: Vec<ExecutionResult>,
     pub stats: ExecutionStats,
+}
+
+impl Default for BatchExecutionResult {
+    fn default() -> Self {
+        Self { executed_txs: Default::default(), execution_results: Vec::new(), stats: Default::default() }
+    }
 }
 
 /// Receiver for the stop condition of the executor thread.

@@ -20,6 +20,7 @@ mp-chain-config = { workspace = true }
 mp-convert = { workspace = true }
 mp-rpc = { workspace = true }
 mp-transactions = { workspace = true }
+mp-utils.workspace = true
 
 # Starknet
 blockifier = { workspace = true }
